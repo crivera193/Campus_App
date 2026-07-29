@@ -1,54 +1,54 @@
+import 'package:campus_app/screens/map_screen.dart';
 import 'package:flutter/material.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:mapbox_maps_flutter/mapbox_maps_flutter.dart';
 
-Future<void> main() async {
+void main() {
   WidgetsFlutterBinding.ensureInitialized();
 
-  await Supabase.initialize(
-    url: 'https://njtpfiigzvxytwivipxs.supabase.co',
-    anonKey: 'sb_publishable_yJkW8eLqJ9Vod48IthOSQw_x_tSWc8c',
-  );
+  const accessToken = String.fromEnvironment('ACCESS_TOKEN');
 
-  runApp(const MyApp());
+  if (accessToken.isEmpty) {
+    runApp(const MissingTokenApp());
+    return;
+  }
+
+  MapboxOptions.setAccessToken(accessToken);
+
+  runApp(const CampusApp());
 }
 
-final supabase = Supabase.instance.client;
-
-class MyApp extends StatelessWidget {
-  const MyApp({super.key});
+class CampusApp extends StatelessWidget {
+  const CampusApp({super.key});
 
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Campus App',
+      title: 'UTRGV Campus App',
       debugShowCheckedModeBanner: false,
-      theme: ThemeData(
-        colorSchemeSeed: Colors.green,
-        useMaterial3: true,
-      ),
-      home: const HomeScreen(),
+      theme: ThemeData(useMaterial3: true),
+      home: const MapScreen(),
     );
   }
 }
 
-class HomeScreen extends StatelessWidget {
-  const HomeScreen({super.key});
-
-  void testConnection() {
-    debugPrint('Supabase connected!');
-    debugPrint('Supabase client: $supabase');
-  }
+class MissingTokenApp extends StatelessWidget {
+  const MissingTokenApp({super.key});
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Campus App'),
-      ),
-      body: Center(
-        child: ElevatedButton(
-          onPressed: testConnection,
-          child: const Text('Test Supabase Connection'),
+    return const MaterialApp(
+      debugShowCheckedModeBanner: false,
+      home: Scaffold(
+        body: Center(
+          child: Padding(
+            padding: EdgeInsets.all(24),
+            child: Text(
+              'Mapbox token missing.\n\n'
+              'Run the app using:\n'
+              'flutter run --dart-define=ACCESS_TOKEN=pk.YOUR_TOKEN',
+              textAlign: TextAlign.center,
+            ),
+          ),
         ),
       ),
     );
