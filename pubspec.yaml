@@ -36,6 +36,7 @@ dependencies:
   cupertino_icons: ^1.0.8
   supabase_flutter: ^2.12.4
   mapbox_maps_flutter: 2.26.0
+  permission_handler: ^13.0.0
 
 dev_dependencies:
   flutter_test:
