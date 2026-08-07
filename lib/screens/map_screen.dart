@@ -17,8 +17,18 @@ class _MapScreenState extends State<MapScreen> {
       26.304551,
     ),
   );
+  
+  // Coordinates for UTRGV Brownsville Campus
+  static final Point utrgvBrownsvilleCampus = Point(
+  coordinates: Position(
+    -97.48619, // longitude
+    25.89151,  // latitude
+  ),
+);
 
   MapboxMap? _mapboxMap;
+  //Boolean to track if the user is on the Brownsville campus
+  bool _isBrownsville = false;
 
   ViewportState _viewport = CameraViewportState(
     center: utrgvEdinburgCampus,
@@ -106,6 +116,21 @@ class _MapScreenState extends State<MapScreen> {
     }
   }
 
+void _toggleCampus() {
+  setState(() {
+    _isBrownsville = !_isBrownsville;
+
+    _viewport = CameraViewportState(
+      center: _isBrownsville
+          ? utrgvBrownsvilleCampus
+          : utrgvEdinburgCampus,
+      zoom: 16.0,
+      pitch: 45.0,
+      bearing: 0.0,
+    );
+  });
+}
+
   Future<void> _recenterOnUser() async {
     final status = await Permission.locationWhenInUse.status;
 
@@ -153,36 +178,46 @@ class _MapScreenState extends State<MapScreen> {
               child: Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 16,
-                      vertical: 12,
-                    ),
-                    decoration: BoxDecoration(
-                      color: Colors.white,
-                      borderRadius: BorderRadius.circular(18),
-                      boxShadow: const [
-                        BoxShadow(
-                          color: Colors.black26,
-                          blurRadius: 12,
-                        ),
-                      ],
-                    ),
-                    child: const Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(Icons.location_on),
-                        SizedBox(width: 8),
-                        Text(
-                          'UTRGV Campus',
-                          style: TextStyle(
-                            fontSize: 17,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
+                  GestureDetector(
+  onTap: _toggleCampus,
+  child: Container(
+    padding: const EdgeInsets.symmetric(
+      horizontal: 16,
+      vertical: 12,
+    ),
+    decoration: BoxDecoration(
+      color: Colors.white,
+      borderRadius: BorderRadius.circular(18),
+      boxShadow: const [
+        BoxShadow(
+          color: Colors.black26,
+          blurRadius: 12,
+        ),
+      ],
+    ),
+    child: Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        const Icon(Icons.location_on),
+        const SizedBox(width: 8),
+        Text(
+          _isBrownsville
+              ? 'Brownsville Campus'
+              : 'Edinburg Campus',
+          style: const TextStyle(
+            fontSize: 17,
+            fontWeight: FontWeight.bold,
+          ),
+        ),
+        const SizedBox(width: 8),
+        const Icon(
+          Icons.swap_horiz,
+          size: 20,
+        ),
+      ],
+    ),
+  ),
+),
                   const Spacer(),
                   const LogoutButton(),
                 ],
