@@ -12,7 +12,7 @@ class MapScreen extends StatefulWidget {
   State<MapScreen> createState() => _MapScreenState();
 }
 
-//Data for each markers 
+//Making Data for each markers 
 class LocationData {
   final String title;
   final String description;
@@ -28,8 +28,8 @@ class LocationData {
 class _MapScreenState extends State<MapScreen> {
   static final Point utrgvEdinburgCampus = Point(
     coordinates: Position(
-      -98.174165,
-      26.304551,
+      -98.174165, //logitude
+      26.304551,  //latitude
     ),
   );
   
@@ -59,10 +59,10 @@ class _MapScreenState extends State<MapScreen> {
   Future<void> _onMapCreated(MapboxMap mapboxMap) async {
     _mapboxMap = mapboxMap;
     await _enableLiveLocation();
-    await _addCustomMarkers();
+    await _addCustomMarkers();  
   }
 
-  //Lists of all the coordinates where to add a marker
+  //Lists of all the coordinates where to add a marker (W.I.P,)
   final List<LocationData> customLocations = [
     LocationData(
       title: 'Utrgv Sign',
@@ -76,7 +76,7 @@ class _MapScreenState extends State<MapScreen> {
     ),
   ];
 
-  //This Map to link Mapbox's auto-generated IDs to the custom data
+  //This Map is to link Mapbox's auto-generated IDs to the custom location data
   final Map<String, LocationData> _annotationDataMap = {};
 
   Future<void> _addCustomMarkers() async {
@@ -85,7 +85,7 @@ class _MapScreenState extends State<MapScreen> {
     // 1. Initialize the annotation manager
     _pointAnnotationManager = await _mapboxMap!.annotations.createPointAnnotationManager();
 
-    // 2. Load the custom marker image from your assets folder
+    // 2. Load the custom marker image from the assets folder
     final ByteData bytes = await rootBundle.load('assets/test_marker.png');
     final Uint8List imageData = bytes.buffer.asUint8List();
 
@@ -96,7 +96,7 @@ class _MapScreenState extends State<MapScreen> {
         image: imageData,
         iconSize: 0.3,
         textField: loc.title,
-        textOffset: [0.0, 1,5],
+        textOffset: [0.0, 1.5],
       );
     }).toList();
     // 4. Add the markers to the map simultaneously & make annotation and IDs
@@ -117,7 +117,7 @@ class _MapScreenState extends State<MapScreen> {
     // 6. Handle using the taps 
     _pointAnnotationManager?.tapEvents(
       onTap: (annotation) {
-        //Look up the location that was tapped from its ID
+        //Look up the location marker that was tapped from its ID
         final locationInfo = _annotationDataMap[annotation.id];
         if (locationInfo != null) {
           _showLocationModal(locationInfo);
@@ -129,25 +129,27 @@ class _MapScreenState extends State<MapScreen> {
 // Method to slide a modal up from the bottom of the screen
   void _showLocationModal(LocationData data) {
     showModalBottomSheet(
+      //Modal would have a rectangle Border with the description inside(W.I.P)
       context: context,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
       builder: (context) {
-        return Padding(
-          padding: const EdgeInsets.all(24.0),
+        return Container(
+          width: double.infinity,   //Set the modal to span the whole screen width
+          padding: const EdgeInsets.all(20.0),
           child: Column(
-            mainAxisSize: MainAxisSize.min, // Wraps tightly around the content
+            mainAxisSize: MainAxisSize.min, // Wraps tightly around the content test
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
                 data.title,
-                style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
+                style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
               ),
-              const SizedBox(height: 12),
+              const SizedBox(height: 12, width: null),
               Text(
                 data.description,
-                style: const TextStyle(fontSize: 16, color: Colors.black87),
+                style: const TextStyle(fontSize: 18, color: Colors.black87),
               ),
               const SizedBox(height: 32), // Padding at the bottom
             ],
