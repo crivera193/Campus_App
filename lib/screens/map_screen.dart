@@ -1,5 +1,7 @@
-﻿import 'package:campus_app/widgets/logout_button.dart';
+﻿import 'dart:typed_data';
+import 'package:campus_app/widgets/logout_button.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:mapbox_maps_flutter/mapbox_maps_flutter.dart';
 import 'package:permission_handler/permission_handler.dart';
 
@@ -10,11 +12,24 @@ class MapScreen extends StatefulWidget {
   State<MapScreen> createState() => _MapScreenState();
 }
 
+//Making Data for each markers 
+class LocationData {
+  final String title;
+  final String description;
+  final Position coordinates;
+
+  LocationData({
+    required this.title,
+    required this.description,
+    required this.coordinates,
+  });
+}
+
 class _MapScreenState extends State<MapScreen> {
   static final Point utrgvEdinburgCampus = Point(
     coordinates: Position(
-      -98.174165,
-      26.304551,
+      -98.174165, //logitude
+      26.304551,  //latitude
     ),
   );
   
@@ -26,7 +41,9 @@ class _MapScreenState extends State<MapScreen> {
   ),
 );
 
+
   MapboxMap? _mapboxMap;
+  PointAnnotationManager? _pointAnnotationManager;
   //Boolean to track if the user is on the Brownsville campus
   bool _isBrownsville = false;
 
@@ -42,6 +59,104 @@ class _MapScreenState extends State<MapScreen> {
   Future<void> _onMapCreated(MapboxMap mapboxMap) async {
     _mapboxMap = mapboxMap;
     await _enableLiveLocation();
+    await _addCustomMarkers();  
+  }
+
+  //Lists of all the coordinates where to add a marker (W.I.P,)
+  final List<LocationData> customLocations = [
+    LocationData(
+      title: 'Utrgv Sign',
+      description: 'A big sign what reads UTRGV', 
+      coordinates: Position(-98.177886, 26.304073),
+    ),
+    LocationData(
+    title: 'Utrgv Fountian', 
+    description: 'Edinburg Cool looking fountain', 
+    coordinates: Position(-98.176061, 26.304802)
+    ),
+  ];
+
+  //This Map is to link Mapbox's auto-generated IDs to the custom location data
+  final Map<String, LocationData> _annotationDataMap = {};
+
+  Future<void> _addCustomMarkers() async {
+    if (_mapboxMap == null) return;
+
+    // 1. Initialize the annotation manager
+    _pointAnnotationManager = await _mapboxMap!.annotations.createPointAnnotationManager();
+
+    // 2. Load the custom marker image from the assets folder
+    final ByteData bytes = await rootBundle.load('assets/test_marker.png');
+    final Uint8List imageData = bytes.buffer.asUint8List();
+
+    // 3. Loop through the list of coords and make a marker for each one & properties
+    List<PointAnnotationOptions> allMarkerOptions = customLocations.map((loc) {
+      return PointAnnotationOptions(
+        geometry: Point(coordinates: loc.coordinates),
+        image: imageData,
+        iconSize: 0.3,
+        textField: loc.title,
+        textOffset: [0.0, 1.5],
+      );
+    }).toList();
+    // 4. Add the markers to the map simultaneously & make annotation and IDs
+    final annotations = await _pointAnnotationManager?.createMulti(allMarkerOptions);
+
+    // 5. Link the generated ID to locationData
+    if (annotations != null) {
+      for (int i =0; i < annotations.length; i++) {
+        //extract the ID
+        final annotationId = annotations[i]?.id;
+        //Only add to map if ID does exists
+        if (annotationId != null) {
+          _annotationDataMap[annotationId] = customLocations[i];
+        }
+      }
+    }
+
+    // 6. Handle using the taps 
+    _pointAnnotationManager?.tapEvents(
+      onTap: (annotation) {
+        //Look up the location marker that was tapped from its ID
+        final locationInfo = _annotationDataMap[annotation.id];
+        if (locationInfo != null) {
+          _showLocationModal(locationInfo);
+        }
+      }
+    );
+  }
+
+// Method to slide a modal up from the bottom of the screen
+  void _showLocationModal(LocationData data) {
+    showModalBottomSheet(
+      //Modal would have a rectangle Border with the description inside(W.I.P)
+      context: context,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (context) {
+        return Container(
+          width: double.infinity,   //Set the modal to span the whole screen width
+          padding: const EdgeInsets.all(20.0),
+          child: Column(
+            mainAxisSize: MainAxisSize.min, // Wraps tightly around the content test
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                data.title,
+                style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
+              ),
+              const SizedBox(height: 12, width: null),
+              Text(
+                data.description,
+                style: const TextStyle(fontSize: 18, color: Colors.black87),
+              ),
+              const SizedBox(height: 32), // Padding at the bottom
+            ],
+          ),
+        );
+      },
+    );
   }
 
   Future<void> _enableLiveLocation() async {
