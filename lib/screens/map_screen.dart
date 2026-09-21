@@ -61,8 +61,8 @@ class MapScreen extends StatefulWidget {
         final distance = _distanceBetweenCoordinates(
           activity.latitude,
           activity.longitude,
-          location.coordinates.lat,
-          location.coordinates.lng,
+          location.coordinates.lat.toDouble(),
+          location.coordinates.lng.toDouble(),
         );
 
         if (distance <= permanentMarkerAssignmentRadiusInMeters &&
