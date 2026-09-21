@@ -87,4 +87,151 @@ void main() {
     expect((position.lng - second.longitude).abs(), lessThan(0.001));
     expect((position.lat - second.latitude).abs(), lessThan(0.001));
   });
+
+  test('activities near permanent campus markers are grouped under the nearest marker', () {
+    final quad = customLocations.firstWhere((location) => location.title == 'Utrgv Quad');
+    final sundial = customLocations.firstWhere((location) => location.title == 'Sundial');
+    final studentUnion = customLocations.firstWhere((location) => location.title == 'student Union');
+
+    final quadActivities = [
+      Activity(
+        id: 'quad-1',
+        creatorId: 'user-1',
+        title: 'Pickup Volleyball',
+        description: 'Anyone can join!',
+        categoryId: 'sports',
+        campus: 'edinburg',
+        latitude: 26.3045,
+        longitude: -98.1740,
+        startsAt: DateTime.now(),
+        endsAt: DateTime.now().add(const Duration(hours: 2)),
+        indoorOutdoor: 'outdoor',
+        building: null,
+        floor: null,
+        roomOrArea: 'UTRGV Quad',
+        ticketStatus: 'Approved',
+        cancelledAt: null,
+        createdAt: DateTime.now(),
+        updatedAt: DateTime.now(),
+      ),
+      Activity(
+        id: 'quad-2',
+        creatorId: 'user-2',
+        title: 'Study Group',
+        description: 'Studying for exams.',
+        categoryId: 'study',
+        campus: 'edinburg',
+        latitude: 26.30450004,
+        longitude: -98.17399996,
+        startsAt: DateTime.now(),
+        endsAt: DateTime.now().add(const Duration(hours: 2)),
+        indoorOutdoor: 'indoor',
+        building: 'Library',
+        floor: '2',
+        roomOrArea: 'Study Room',
+        ticketStatus: 'Approved',
+        cancelledAt: null,
+        createdAt: DateTime.now(),
+        updatedAt: DateTime.now(),
+      ),
+      Activity(
+        id: 'quad-3',
+        creatorId: 'user-3',
+        title: 'Card Game',
+        description: 'Come play cards with us!',
+        categoryId: 'social',
+        campus: 'edinburg',
+        latitude: 26.30450008,
+        longitude: -98.17399992,
+        startsAt: DateTime.now(),
+        endsAt: DateTime.now().add(const Duration(hours: 2)),
+        indoorOutdoor: 'outdoor',
+        building: null,
+        floor: null,
+        roomOrArea: 'UTRGV Quad',
+        ticketStatus: 'Approved',
+        cancelledAt: null,
+        createdAt: DateTime.now(),
+        updatedAt: DateTime.now(),
+      ),
+    ];
+
+    final sundialActivity = Activity(
+      id: 'sundial-1',
+      creatorId: 'user-4',
+      title: 'Campus Hangout',
+      description: 'Hanging out and meeting people.',
+      categoryId: 'social',
+      campus: 'edinburg',
+      latitude: 26.3060,
+      longitude: -98.1750,
+      startsAt: DateTime.now(),
+      endsAt: DateTime.now().add(const Duration(hours: 2)),
+      indoorOutdoor: 'outdoor',
+      building: null,
+      floor: null,
+      roomOrArea: 'Sundial',
+      ticketStatus: 'Approved',
+      cancelledAt: null,
+      createdAt: DateTime.now(),
+      updatedAt: DateTime.now(),
+    );
+
+    final unionActivity = Activity(
+      id: 'union-1',
+      creatorId: 'user-5',
+      title: 'Study and Coffee',
+      description: 'Quiet study session.',
+      categoryId: 'study',
+      campus: 'edinburg',
+      latitude: 26.3028,
+      longitude: -98.1725,
+      startsAt: DateTime.now(),
+      endsAt: DateTime.now().add(const Duration(hours: 2)),
+      indoorOutdoor: 'indoor',
+      building: 'Student Union',
+      floor: '1',
+      roomOrArea: 'Lounge',
+      ticketStatus: 'Approved',
+      cancelledAt: null,
+      createdAt: DateTime.now(),
+      updatedAt: DateTime.now(),
+    );
+
+    final farAway = Activity(
+      id: 'far-away-1',
+      creatorId: 'user-6',
+      title: 'Distant Event',
+      description: 'Way off campus.',
+      categoryId: 'social',
+      campus: 'edinburg',
+      latitude: 29.0,
+      longitude: -99.0,
+      startsAt: DateTime.now(),
+      endsAt: DateTime.now().add(const Duration(hours: 1)),
+      indoorOutdoor: 'outdoor',
+      building: null,
+      floor: null,
+      roomOrArea: 'Remote',
+      ticketStatus: 'Approved',
+      cancelledAt: null,
+      createdAt: DateTime.now(),
+      updatedAt: DateTime.now(),
+    );
+
+    final grouped = MapScreen.groupActivitiesByPermanentMarker(
+      activities: [
+        ...quadActivities,
+        sundialActivity,
+        unionActivity,
+        farAway,
+      ],
+      permanentLocations: customLocations,
+    );
+
+    expect(grouped[quad.title], containsAll(quadActivities.map((activity) => activity.id)));
+    expect(grouped[sundial.title], contains(sundialActivity.id));
+    expect(grouped[studentUnion.title], contains(unionActivity.id));
+    expect(grouped.values.expand((activities) => activities), isNot(contains(farAway.id)));
+  });
 }

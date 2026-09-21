@@ -1,4 +1,5 @@
 ﻿import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:campus_app/data/campus_locations.dart';
 import 'package:campus_app/models/activity.dart';
@@ -19,9 +20,71 @@ class MapScreen extends StatefulWidget {
   });
 
   static const double nearbyActivityMarkerOffset = 0.00008;
+  static const double permanentMarkerAssignmentRadiusInMeters = 40.0;
 
   final Activity? selectedActivity;
   final int focusRequest;
+
+  static double _distanceBetweenCoordinates(
+    double lat1,
+    double lng1,
+    double lat2,
+    double lng2,
+  ) {
+    const earthRadiusMeters = 6371000.0;
+    final lat1Radians = lat1 * (math.pi / 180);
+    final lat2Radians = lat2 * (math.pi / 180);
+    final deltaLat = (lat2 - lat1) * (math.pi / 180);
+    final deltaLng = (lng2 - lng1) * (math.pi / 180);
+
+    final a = math.sin(deltaLat / 2) * math.sin(deltaLat / 2) +
+        math.cos(lat1Radians) *
+            math.cos(lat2Radians) *
+            math.sin(deltaLng / 2) *
+            math.sin(deltaLng / 2);
+
+    final c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a));
+    return earthRadiusMeters * c;
+  }
+
+  static Map<String, List<Activity>> groupActivitiesByPermanentMarker({
+    required List<Activity> activities,
+    required List<LocationData> permanentLocations,
+  }) {
+    final groupedActivities = <String, List<Activity>>{};
+
+    for (final activity in activities) {
+      LocationData? nearestLocation;
+      double nearestDistance = double.infinity;
+
+      for (final location in permanentLocations) {
+        final distance = _distanceBetweenCoordinates(
+          activity.latitude,
+          activity.longitude,
+          location.coordinates.lat,
+          location.coordinates.lng,
+        );
+
+        if (distance <= permanentMarkerAssignmentRadiusInMeters &&
+            distance < nearestDistance) {
+          nearestDistance = distance;
+          nearestLocation = location;
+        }
+      }
+
+      if (nearestLocation == null) {
+        continue;
+      }
+
+      groupedActivities.putIfAbsent(
+        nearestLocation.title,
+        () => <Activity>[],
+      );
+      groupedActivities[nearestLocation.title]!.add(activity);
+    }
+
+    return groupedActivities;
+  }
 
   static Position computeActivityMarkerPosition(
     Activity activity,
@@ -98,6 +161,8 @@ class _MapScreenState extends State<MapScreen>
   final Map<String, LocationData> _locationAnnotationDataMap = {};
 
   final Map<String, Activity> _activityAnnotationDataMap = {};
+
+  final Map<String, List<Activity>> _permanentMarkerActivitiesMap = {};
 
   MapboxMap? _mapboxMap;
 
@@ -248,6 +313,7 @@ class _MapScreenState extends State<MapScreen>
         if (location != null) {
           _showLocationDetails(
             location,
+            _permanentMarkerActivitiesMap[location.title] ?? const [],
           );
         }
       },
@@ -344,10 +410,8 @@ class _MapScreenState extends State<MapScreen>
           campus: 'edinburg',
           latitude: 26.30450004,
           longitude: -98.17399996,
-          startsAt: DateTime.now(),
-          endsAt: DateTime.now().add(
-            const Duration(hours: 2),
-          ),
+          startsAt: DateTime(2026, 1, 1),
+          endsAt: DateTime(2099, 12, 31),
           indoorOutdoor: 'indoor',
           building: 'Library',
           floor: '2',
@@ -366,10 +430,8 @@ class _MapScreenState extends State<MapScreen>
           campus: 'edinburg',
           latitude: 26.30450008,
           longitude: -98.17399992,
-          startsAt: DateTime.now(),
-          endsAt: DateTime.now().add(
-            const Duration(hours: 2),
-          ),
+          startsAt: DateTime(2026, 1, 1),
+          endsAt: DateTime(2099, 12, 31),
           indoorOutdoor: 'outdoor',
           building: null,
           floor: null,
@@ -388,10 +450,8 @@ class _MapScreenState extends State<MapScreen>
           campus: 'edinburg',
           latitude: 26.3060,
           longitude: -98.1750,
-          startsAt: DateTime.now(),
-          endsAt: DateTime.now().add(
-            const Duration(hours: 3),
-          ),
+          startsAt: DateTime(2026, 1, 1),
+          endsAt: DateTime(2099, 12, 31),
           indoorOutdoor: 'outdoor',
           building: null,
           floor: null,
@@ -410,10 +470,8 @@ class _MapScreenState extends State<MapScreen>
           campus: 'edinburg',
           latitude: 26.3028,
           longitude: -98.1725,
-          startsAt: DateTime.now(),
-          endsAt: DateTime.now().add(
-            const Duration(hours: 2),
-          ),
+          startsAt: DateTime(2026, 1, 1),
+          endsAt: DateTime(2099, 12, 31),
           indoorOutdoor: 'indoor',
           building: 'Student Union',
           floor: '1',
@@ -430,6 +488,27 @@ class _MapScreenState extends State<MapScreen>
         ...testActivities,
       ];
 
+      final groupedActivities =
+          MapScreen.groupActivitiesByPermanentMarker(
+        activities: allActivities,
+        permanentLocations: customLocations,
+      );
+
+      final groupedActivityIds = groupedActivities.values
+          .expand((activitiesForLocation) => activitiesForLocation)
+          .map((activity) => activity.id)
+          .toSet();
+
+      final standaloneActivities = allActivities
+          .where(
+            (activity) => !groupedActivityIds.contains(activity.id),
+          )
+          .toList();
+
+      _permanentMarkerActivitiesMap
+        ..clear()
+        ..addAll(groupedActivities);
+
       if (!mounted ||
           request != _activityRefreshRequest) {
         return;
@@ -440,7 +519,7 @@ class _MapScreenState extends State<MapScreen>
       _activityAnnotationDataMap.clear();
 
       final annotations = await activityManager.createMulti(
-        allActivities.asMap().entries
+        standaloneActivities.asMap().entries
             .map(
               (entry) {
                 final index = entry.key;
@@ -450,7 +529,7 @@ class _MapScreenState extends State<MapScreen>
                     MapScreen.computeActivityMarkerPosition(
                   activity,
                   index,
-                  allActivities,
+                  standaloneActivities,
                 );
 
                 return CircleAnnotationOptions(
@@ -477,7 +556,7 @@ class _MapScreenState extends State<MapScreen>
 
         if (annotationId != null) {
           _activityAnnotationDataMap[annotationId] =
-              allActivities[index];
+              standaloneActivities[index];
         }
       }
     } catch (error) {
@@ -541,8 +620,9 @@ class _MapScreenState extends State<MapScreen>
   }
 
   void _showLocationDetails(
-    LocationData data,
-  ) {
+    LocationData data, [
+    List<Activity> activities = const [],
+  ]) {
     bool showOtherView = false;
 
     showModalBottomSheet<void>(
@@ -595,6 +675,9 @@ class _MapScreenState extends State<MapScreen>
               );
             }
 
+            final hasAssociatedActivities =
+                activities.isNotEmpty;
+
             return Padding(
               padding: const EdgeInsets.all(20),
               child: Column(
@@ -622,60 +705,102 @@ class _MapScreenState extends State<MapScreen>
                   const SizedBox(
                     height: 24,
                   ),
-                  const Text(
-                    'Event Table (W.I.P.)',
-                    style: TextStyle(
-                      fontSize: 20,
-                      fontWeight: FontWeight.bold,
+                  if (hasAssociatedActivities) ...[
+                    const Text(
+                      'Activities at this location',
+                      style: TextStyle(
+                        fontSize: 20,
+                        fontWeight: FontWeight.bold,
+                      ),
                     ),
-                  ),
-                  const SizedBox(
-                    height: 8,
-                  ),
-                  DataTable(
-                    columns: [
-                      DataColumn(
-                        label: Text(
-                          'Event Name',
+                    const SizedBox(
+                      height: 8,
+                    ),
+                    ...activities.map(
+                      (activity) => ListTile(
+                        contentPadding: EdgeInsets.zero,
+                        title: Text(
+                          activity.title,
+                          style: const TextStyle(
+                            fontWeight: FontWeight.w600,
+                          ),
                         ),
-                      ),
-                      DataColumn(
-                        label: Text(
-                          'Time',
+                        subtitle: Text(
+                          activity.roomOrArea ??
+                              activity.building ??
+                              'Campus activity',
                         ),
+                        trailing: const Icon(
+                          Icons.chevron_right,
+                        ),
+                        onTap: () {
+                          Navigator.of(context).pop();
+                          showActivityDetailsSheet(
+                            context,
+                            activity,
+                          );
+                        },
                       ),
-                    ],
-                    rows: [
-                      DataRow(
-                        cells: [
-                          DataCell(
-                            Text(
-                              'Sample Event 1',
-                            ),
-                          ),
-                          DataCell(
-                            Text(
-                              '11:00 AM',
-                            ),
-                          ),
-                        ],
+                    ),
+                    const SizedBox(
+                      height: 16,
+                    ),
+                  ] else ...[
+                    const Text(
+                      'Event Table (W.I.P.)',
+                      style: TextStyle(
+                        fontSize: 20,
+                        fontWeight: FontWeight.bold,
                       ),
-                      DataRow(
-                        cells: [
-                          DataCell(
-                            Text(
-                              'Sample Event 2',
-                            ),
+                    ),
+                    const SizedBox(
+                      height: 8,
+                    ),
+                    DataTable(
+                      columns: [
+                        DataColumn(
+                          label: Text(
+                            'Event Name',
                           ),
-                          DataCell(
-                            Text(
-                              '2:00 PM',
-                            ),
+                        ),
+                        DataColumn(
+                          label: Text(
+                            'Time',
                           ),
-                        ],
-                      ),
-                    ],
-                  ),
+                        ),
+                      ],
+                      rows: [
+                        DataRow(
+                          cells: [
+                            DataCell(
+                              Text(
+                                'Sample Event 1',
+                              ),
+                            ),
+                            DataCell(
+                              Text(
+                                '11:00 AM',
+                              ),
+                            ),
+                          ],
+                        ),
+                        DataRow(
+                          cells: [
+                            DataCell(
+                              Text(
+                                'Sample Event 2',
+                              ),
+                            ),
+                            DataCell(
+                              Text(
+                                '2:00 PM',
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ],
                   const SizedBox(
                     height: 16,
                   ),
