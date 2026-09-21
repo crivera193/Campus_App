@@ -17,22 +17,11 @@ class ActivityLocationPickerScreen extends StatefulWidget {
 class _ActivityLocationPickerScreenState
     extends State<ActivityLocationPickerScreen> {
   late Point _selectedLocation;
-  ViewportState? _viewport;
-
-  MapboxMap? _mapboxMap;
 
   @override
   void initState() {
     super.initState();
-
     _selectedLocation = widget.initialLocation;
-
-    _viewport = CameraViewportState(
-      center: widget.initialLocation,
-      zoom: 17.0,
-      pitch: 45.0,
-      bearing: 0.0,
-    );
   }
 
   void _onMapTap(MapContentGestureContext context) {
@@ -55,26 +44,22 @@ class _ActivityLocationPickerScreenState
         children: [
           MapWidget(
             key: const ValueKey('activity-location-picker-map'),
-            viewport: _viewport,
-            onMapCreated: (mapboxMap) {
-              _mapboxMap = mapboxMap;
-
-              mapboxMap.gestures.addInteraction(
-                TapInteraction(
-                  StandardTapTarget.map,
-                  (feature, context) {
-                    _onMapTap(context);
-                  },
-                ),
-              );
-            },
+            cameraOptions: CameraOptions(
+              center: widget.initialLocation,
+              zoom: 17.0,
+              pitch: 45.0,
+              bearing: 0.0,
+            ),
+            onTapListener: _onMapTap,
           ),
 
-          const Center(
-            child: Icon(
-              Icons.location_pin,
-              size: 48,
-              color: Colors.red,
+          const IgnorePointer(
+            child: Center(
+              child: Icon(
+                Icons.location_pin,
+                size: 48,
+                color: Colors.red,
+              ),
             ),
           ),
 

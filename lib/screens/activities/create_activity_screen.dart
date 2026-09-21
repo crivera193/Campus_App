@@ -4,7 +4,8 @@ import 'package:campus_app/services/activity_repository.dart';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:campus_app/screens/activities/activity_location_picker_screen.dart';
-import 'package:mapbox_maps_flutter/mapbox_maps_flutter.dart';
+import 'package:mapbox_maps_flutter/mapbox_maps_flutter.dart'
+    as mapbox;
 
 class CreateActivityScreen extends StatefulWidget {
   const CreateActivityScreen({
@@ -61,14 +62,15 @@ class _CreateActivityScreenState extends State<CreateActivityScreen> {
   }
 
   Future<void> _chooseLocation() async {
-    final initialLocation = Point(
-      coordinates: Position(
+    final initialLocation = mapbox.Point(
+      coordinates: mapbox.Position(
         _longitude ?? -98.174165,
         _latitude ?? 26.304551,
       ),
     );
 
-    final selectedLocation = await Navigator.of(context).push<Point>(
+    final selectedLocation =
+        await Navigator.of(context).push<mapbox.Point>(
       MaterialPageRoute(
         builder: (context) => ActivityLocationPickerScreen(
           initialLocation: initialLocation,
