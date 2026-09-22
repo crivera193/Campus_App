@@ -1,6 +1,7 @@
 import 'package:campus_app/main.dart';
 import 'package:campus_app/models/activity.dart';
 import 'package:campus_app/screens/map_screen.dart';
+import 'package:campus_app/data/campus_locations.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mapbox_maps_flutter/mapbox_maps_flutter.dart';
 
