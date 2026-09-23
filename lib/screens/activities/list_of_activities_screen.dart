@@ -25,6 +25,9 @@ class _ActivityListScreenState extends State<ActivityListScreen> {
 
   late Future<List<Activity>> _activitiesFuture;
 
+  // Keep joined activities in this screen's state (not saved to Supabase).
+  final Set<String> _joinedActivityKeys = <String>{};
+
   // Store category IDs 
   // An empty set means "all categories" are selected.
   Set<String> _selectedCategories = <String>{};
@@ -58,6 +61,26 @@ class _ActivityListScreenState extends State<ActivityListScreen> {
     });
 
     await future;
+  }
+
+  // Use existing activity details to recognize it after a list refresh.
+  String _activityJoinKey(Activity activity) {
+    return '${activity.category.id}|${activity.title}|'
+        '${activity.startsAt.toUtc().toIso8601String()}|'
+        '${activity.endsAt.toUtc().toIso8601String()}|'
+        '${activity.latitude}|${activity.longitude}';
+  }
+
+  // Toggle Join/Leave for an activity that has not ended.
+  void _toggleJoin(Activity activity) {
+    if (_isExpired(activity)) return;
+
+    final key = _activityJoinKey(activity);
+    setState(() {
+      if (!_joinedActivityKeys.add(key)) {
+        _joinedActivityKeys.remove(key);
+      }
+    });
   }
 
   bool _isExpired(Activity activity) {
@@ -562,6 +585,8 @@ class _ActivityListScreenState extends State<ActivityListScreen> {
     Activity activity,
   ) {
     final expired = _isExpired(activity);
+    // Choose the button label and color from activity's join state.
+    final isJoined = _joinedActivityKeys.contains(_activityJoinKey(activity));
 
     final normalTextColor =
         Theme.of(context).colorScheme.onSurface;
@@ -747,20 +772,37 @@ class _ActivityListScreenState extends State<ActivityListScreen> {
                 alignment:
                     Alignment.centerRight,
 
-                child: FilledButton.icon(
-                  onPressed: () {
-                    widget.onViewOnMap(
-                      activity,
-                    );
-                  },
+                child: Wrap(
+                  alignment: WrapAlignment.end,
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    // Active activities show a blue Join or red Leave button.
+                    FilledButton.icon(
+                      onPressed: () => _toggleJoin(activity),
+                      style: FilledButton.styleFrom(
+                        backgroundColor: isJoined ? Colors.red : Colors.blue,
+                        foregroundColor: Colors.white,
+                      ),
+                      icon: Icon(isJoined ? Icons.logout : Icons.add),
+                      label: Text(isJoined ? 'Leave' : 'Join'),
+                    ),
+                    FilledButton.icon(
+                      onPressed: () {
+                        widget.onViewOnMap(
+                          activity,
+                        );
+                      },
 
-                  icon: const Icon(
-                    Icons.map_outlined,
-                  ),
+                      icon: const Icon(
+                        Icons.map_outlined,
+                      ),
 
-                  label: const Text(
-                    'View on map',
-                  ),
+                      label: const Text(
+                        'View on map',
+                      ),
+                    ),
+                  ],
                 ),
               ),
             ],
@@ -770,3 +812,4 @@ class _ActivityListScreenState extends State<ActivityListScreen> {
     );
   }
 }
+//Hi chat -Y
