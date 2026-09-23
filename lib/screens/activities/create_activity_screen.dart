@@ -4,8 +4,7 @@ import 'package:campus_app/services/activity_repository.dart';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:campus_app/screens/activities/activity_location_picker_screen.dart';
-import 'package:mapbox_maps_flutter/mapbox_maps_flutter.dart'
-    as mapbox;
+import 'package:mapbox_maps_flutter/mapbox_maps_flutter.dart' as mapbox;
 
 class CreateActivityScreen extends StatefulWidget {
   const CreateActivityScreen({
@@ -30,6 +29,7 @@ class _CreateActivityScreenState extends State<CreateActivityScreen> {
   final _buildingController = TextEditingController();
   final _floorController = TextEditingController();
   final _roomOrAreaController = TextEditingController();
+  final _maxParticipantsController = TextEditingController();
   final _activityRepository = ActivityRepository();
 
   late DateTime _startsAt;
@@ -58,6 +58,7 @@ class _CreateActivityScreenState extends State<CreateActivityScreen> {
     _buildingController.dispose();
     _floorController.dispose();
     _roomOrAreaController.dispose();
+    _maxParticipantsController.dispose();
     super.dispose();
   }
 
@@ -69,12 +70,10 @@ class _CreateActivityScreenState extends State<CreateActivityScreen> {
       ),
     );
 
-    final selectedLocation =
-        await Navigator.of(context).push<mapbox.Point>(
+    final selectedLocation = await Navigator.of(context).push<mapbox.Point>(
       MaterialPageRoute(
-        builder: (context) => ActivityLocationPickerScreen(
-          initialLocation: initialLocation,
-        ),
+        builder: (context) =>
+            ActivityLocationPickerScreen(initialLocation: initialLocation),
       ),
     );
 
@@ -154,6 +153,7 @@ class _CreateActivityScreenState extends State<CreateActivityScreen> {
       building: _optionalValue(_buildingController.text),
       floor: _optionalValue(_floorController.text),
       roomOrArea: _optionalValue(_roomOrAreaController.text),
+      maxParticipants: int.tryParse(_maxParticipantsController.text.trim()),
     );
 
     final validationMessage = draft.validate();
@@ -169,8 +169,7 @@ class _CreateActivityScreenState extends State<CreateActivityScreen> {
 
     if (_startsAt.isBefore(now.subtract(const Duration(minutes: 1)))) {
       setState(() {
-        _submissionError =
-            'Choose a start time that is now or in the future.';
+        _submissionError = 'Choose a start time that is now or in the future.';
       });
       return;
     }
@@ -189,10 +188,10 @@ class _CreateActivityScreenState extends State<CreateActivityScreen> {
 
       final message = error is PostgrestException
           ? 'Activity could not be created. Supabase reported: ${error.message} '
-              'The activity database may not be available yet. '
-              'Apply the migration in Supabase first.'
+                'The activity database may not be available yet. '
+                'Apply the migration in Supabase first.'
           : 'Activity could not be created. The activity database may not '
-              'be available yet. Please try again later.';
+                'be available yet. Please try again later.';
 
       setState(() {
         _submissionError = message;
@@ -227,9 +226,7 @@ class _CreateActivityScreenState extends State<CreateActivityScreen> {
         backgroundColor: const Color(0xFFF7F4F2),
         actions: [
           TextButton(
-            onPressed: _isSubmitting
-                ? null
-                : () => Navigator.of(context).pop(),
+            onPressed: _isSubmitting ? null : () => Navigator.of(context).pop(),
             child: const Text('Cancel'),
           ),
         ],
@@ -243,8 +240,8 @@ class _CreateActivityScreenState extends State<CreateActivityScreen> {
               Text(
                 'Post something happening on campus',
                 style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                      fontWeight: FontWeight.bold,
-                    ),
+                  fontWeight: FontWeight.bold,
+                ),
               ),
               const SizedBox(height: 8),
               const Text(
@@ -273,8 +270,9 @@ class _CreateActivityScreenState extends State<CreateActivityScreen> {
                             label: Text(category.label),
                             avatar: Icon(category.icon, size: 18),
                             selected: _categoryId == category.id,
-                            selectedColor:
-                                category.color.withValues(alpha: 0.2),
+                            selectedColor: category.color.withValues(
+                              alpha: 0.2,
+                            ),
                             onSelected: (_) {
                               setState(() {
                                 _categoryId = category.id;
@@ -341,9 +339,7 @@ class _CreateActivityScreenState extends State<CreateActivityScreen> {
                 const SizedBox(height: 6),
                 Text(
                   _locationError!,
-                  style: TextStyle(
-                    color: Theme.of(context).colorScheme.error,
-                  ),
+                  style: TextStyle(color: Theme.of(context).colorScheme.error),
                 ),
               ],
 
@@ -359,14 +355,8 @@ class _CreateActivityScreenState extends State<CreateActivityScreen> {
                   border: OutlineInputBorder(),
                 ),
                 items: const [
-                  DropdownMenuItem(
-                    value: 'indoor',
-                    child: Text('Indoor'),
-                  ),
-                  DropdownMenuItem(
-                    value: 'outdoor',
-                    child: Text('Outdoor'),
-                  ),
+                  DropdownMenuItem(value: 'indoor', child: Text('Indoor')),
+                  DropdownMenuItem(value: 'outdoor', child: Text('Outdoor')),
                 ],
                 onChanged: (value) => setState(() {
                   _indoorOutdoor = value;
@@ -408,6 +398,29 @@ class _CreateActivityScreenState extends State<CreateActivityScreen> {
                 ),
               ),
 
+              const SizedBox(height: 16),
+
+              TextFormField(
+                controller: _maxParticipantsController,
+                keyboardType: TextInputType.number,
+                textInputAction: TextInputAction.next,
+                decoration: const InputDecoration(
+                  labelText: 'Maximum participants (optional)',
+                  hintText: 'Leave blank for unlimited',
+                  border: OutlineInputBorder(),
+                ),
+                validator: (value) {
+                  final trimmed = value?.trim() ?? '';
+                  if (trimmed.isEmpty) return null;
+
+                  final maximum = int.tryParse(trimmed);
+                  if (maximum == null || maximum < 1) {
+                    return 'Enter a whole number of at least 1.';
+                  }
+                  return null;
+                },
+              ),
+
               const SizedBox(height: 20),
 
               _sectionTitle(context, 'When'),
@@ -432,16 +445,13 @@ class _CreateActivityScreenState extends State<CreateActivityScreen> {
                 Container(
                   padding: const EdgeInsets.all(12),
                   decoration: BoxDecoration(
-                    color:
-                        Theme.of(context).colorScheme.errorContainer,
+                    color: Theme.of(context).colorScheme.errorContainer,
                     borderRadius: BorderRadius.circular(10),
                   ),
                   child: Text(
                     _submissionError!,
                     style: TextStyle(
-                      color: Theme.of(context)
-                          .colorScheme
-                          .onErrorContainer,
+                      color: Theme.of(context).colorScheme.onErrorContainer,
                     ),
                   ),
                 ),
@@ -458,15 +468,11 @@ class _CreateActivityScreenState extends State<CreateActivityScreen> {
                     ? const SizedBox(
                         width: 20,
                         height: 20,
-                        child: CircularProgressIndicator(
-                          strokeWidth: 2,
-                        ),
+                        child: CircularProgressIndicator(strokeWidth: 2),
                       )
                     : const Icon(Icons.add_location_alt_outlined),
                 label: Text(
-                  _isSubmitting
-                      ? 'Creating activity...'
-                      : 'Create activity',
+                  _isSubmitting ? 'Creating activity...' : 'Create activity',
                 ),
               ),
             ],
@@ -479,10 +485,9 @@ class _CreateActivityScreenState extends State<CreateActivityScreen> {
   Widget _sectionTitle(BuildContext context, String title) {
     return Text(
       title,
-      style: Theme.of(context)
-          .textTheme
-          .titleMedium
-          ?.copyWith(fontWeight: FontWeight.bold),
+      style: Theme.of(
+        context,
+      ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold),
     );
   }
 }
@@ -503,16 +508,13 @@ class _LocationCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final hasLocation = latitude != null && longitude != null;
-    final campusLabel =
-        campus == 'brownsville' ? 'Brownsville' : 'Edinburg';
+    final campusLabel = campus == 'brownsville' ? 'Brownsville' : 'Edinburg';
 
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: Theme.of(context)
-            .colorScheme
-            .surfaceContainerHighest,
+        color: Theme.of(context).colorScheme.surfaceContainerHighest,
         borderRadius: BorderRadius.circular(12),
       ),
       child: Column(
@@ -527,8 +529,8 @@ class _LocationCard extends StatelessWidget {
                 child: Text(
                   hasLocation
                       ? 'Location selected on the $campusLabel campus.\n'
-                          'Latitude ${latitude!.toStringAsFixed(6)}, '
-                          'longitude ${longitude!.toStringAsFixed(6)}.'
+                            'Latitude ${latitude!.toStringAsFixed(6)}, '
+                            'longitude ${longitude!.toStringAsFixed(6)}.'
                       : 'Choose where your activity will take place.',
                 ),
               ),
@@ -541,9 +543,7 @@ class _LocationCard extends StatelessWidget {
               onPressed: onChooseLocation,
               icon: const Icon(Icons.map_outlined),
               label: Text(
-                hasLocation
-                    ? 'Change location'
-                    : 'Choose location on map',
+                hasLocation ? 'Change location' : 'Choose location on map',
               ),
             ),
           ),

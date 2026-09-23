@@ -134,6 +134,7 @@ class ActivityDraft {
     required this.building,
     required this.floor,
     required this.roomOrArea,
+    this.maxParticipants,
   });
 
   final String title;
@@ -148,6 +149,7 @@ class ActivityDraft {
   final String? building;
   final String? floor;
   final String? roomOrArea;
+  final int? maxParticipants;
 
   String? validate() {
     final errors = <String>[];
@@ -193,6 +195,10 @@ class ActivityDraft {
       errors.add('Activities can last no longer than 24 hours.');
     }
 
+    if (maxParticipants != null && maxParticipants! < 1) {
+      errors.add('Maximum participants must be at least 1.');
+    }
+
     if (errors.isEmpty) {
       return null;
     }
@@ -214,6 +220,7 @@ class ActivityDraft {
       'building': building,
       'floor': floor,
       'room_or_area': roomOrArea,
+      'max_participants': maxParticipants,
 
       // Do NOT send ticket_status here.
       // Supabase automatically sets it to Pending.
