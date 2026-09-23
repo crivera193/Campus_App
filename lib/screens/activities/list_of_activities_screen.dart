@@ -2,33 +2,30 @@ import 'package:campus_app/models/activity.dart';
 import 'package:campus_app/models/activity_category.dart';
 import 'package:campus_app/services/activity_repository.dart';
 import 'package:flutter/material.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 // Controls which activity dates appear in the filtered list.
 enum _ActivityStatusFilter { all, active, ended }
 
 class ActivityListScreen extends StatefulWidget {
-  const ActivityListScreen({
-    super.key,
-    required this.onViewOnMap,
-  });
+  const ActivityListScreen({super.key, required this.onViewOnMap});
 
   final ValueChanged<Activity> onViewOnMap;
 
   @override
-  State<ActivityListScreen> createState() =>
-      _ActivityListScreenState();
+  State<ActivityListScreen> createState() => _ActivityListScreenState();
 }
 
 class _ActivityListScreenState extends State<ActivityListScreen> {
-  final ActivityRepository _activityRepository =
-      ActivityRepository();
+  final ActivityRepository _activityRepository = ActivityRepository();
 
   late Future<List<Activity>> _activitiesFuture;
 
-  // Keep joined activities in this screen's state (not saved to Supabase).
-  final Set<String> _joinedActivityKeys = <String>{};
+  // IDs of activities with an ongoing join/leave request, for which the button
+  // must be disabled to prevent concurrency issues.
+  final Set<String> _busyActivityIds = <String>{};
 
-  // Store category IDs 
+  // Store category IDs
   // An empty set means "all categories" are selected.
   Set<String> _selectedCategories = <String>{};
 
@@ -63,30 +60,104 @@ class _ActivityListScreenState extends State<ActivityListScreen> {
     await future;
   }
 
-  // Use existing activity details to recognize it after a list refresh.
-  String _activityJoinKey(Activity activity) {
-    return '${activity.category.id}|${activity.title}|'
-        '${activity.startsAt.toUtc().toIso8601String()}|'
-        '${activity.endsAt.toUtc().toIso8601String()}|'
-        '${activity.latitude}|${activity.longitude}';
+  // Join or leave an activity in Supabase, then reload the list so the
+  // button, participant count and Full state all come from the database.
+  Future<void> _joinOrLeave(Activity activity) async {
+    if (_busyActivityIds.contains(activity.id)) return;
+
+    setState(() => _busyActivityIds.add(activity.id));
+
+    String? errorMessage;
+
+    try {
+      if (activity.hasJoined) {
+        await _activityRepository.leaveActivity(activity.id);
+      } else {
+        await _activityRepository.joinActivity(activity.id);
+      }
+    } on PostgrestException catch (error) {
+      // 23505 = duplicate primary key, meaning the user already joined.
+      errorMessage = error.code == '23505'
+          ? 'You already joined this activity.'
+          : error.message;
+    } on StateError catch (error) {
+      errorMessage = error.message;
+    } catch (_) {
+      // Anything else (no connection, expired session, ...). Catching it
+      // here guarantees the busy flag below is always cleared.
+      errorMessage = 'Something went wrong. Please try again.';
+    }
+
+    if (!mounted) return;
+
+    if (errorMessage != null) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(errorMessage)));
+    }
+
+    // Refresh whether or not the action worked: a rejected join usually
+    // means the data on screen was stale (for example, the last spot was
+    // just taken).
+    try {
+      await _refreshActivities();
+    } catch (_) {
+      // The FutureBuilder already shows load errors.
+    }
+
+    if (!mounted) return;
+
+    // Only re-enable the button once the list has reloaded, so it never
+    // shows the old Join/Leave label while the new data is on its way.
+    setState(() => _busyActivityIds.remove(activity.id));
   }
 
-  // Toggle Join/Leave for an activity that has not ended.
-  void _toggleJoin(Activity activity) {
-    if (_isExpired(activity)) return;
+  // Returns the Join / Leave / Full button, or null when there should be no
+  // button (the user's own activity, or an activity that is not open).
+  Widget? _buildJoinButton(Activity activity) {
+    if (activity.isOwner || !activity.isOpen) return null;
 
-    final key = _activityJoinKey(activity);
-    setState(() {
-      if (!_joinedActivityKeys.add(key)) {
-        _joinedActivityKeys.remove(key);
-      }
-    });
+    final busy = _busyActivityIds.contains(activity.id);
+
+    if (activity.hasJoined) {
+      return FilledButton.icon(
+        onPressed: busy ? null : () => _joinOrLeave(activity),
+        style: FilledButton.styleFrom(
+          backgroundColor: Colors.red,
+          foregroundColor: Colors.white,
+        ),
+        icon: const Icon(Icons.logout),
+        label: const Text('Leave'),
+      );
+    }
+
+    if (activity.isFull) {
+      return const FilledButton(onPressed: null, child: Text('Full'));
+    }
+
+    return FilledButton.icon(
+      onPressed: busy ? null : () => _joinOrLeave(activity),
+      style: FilledButton.styleFrom(
+        backgroundColor: Colors.blue,
+        foregroundColor: Colors.white,
+      ),
+      icon: const Icon(Icons.add),
+      label: const Text('Join'),
+    );
+  }
+
+  String _formatParticipants(Activity activity) {
+    final count = activity.participantCount;
+    final max = activity.maxParticipants;
+
+    final noun = (count == 1 && max == null) ? 'person' : 'people';
+    final amount = max == null ? '$count' : '$count / $max';
+
+    return '$amount $noun joined';
   }
 
   bool _isExpired(Activity activity) {
-    return activity.endsAt.toLocal().isBefore(
-      DateTime.now(),
-    );
+    return activity.endsAt.toLocal().isBefore(DateTime.now());
   }
 
   int _daysSinceEnded(Activity activity) {
@@ -128,27 +199,20 @@ class _ActivityListScreenState extends State<ActivityListScreen> {
   }
 
   String _formatTimeRange(Activity activity) {
-    final localizations =
-        MaterialLocalizations.of(context);
+    final localizations = MaterialLocalizations.of(context);
 
     final start = activity.startsAt.toLocal();
     final end = activity.endsAt.toLocal();
 
-    final startDate =
-        localizations.formatMediumDate(start);
+    final startDate = localizations.formatMediumDate(start);
 
-    final endDate =
-        localizations.formatMediumDate(end);
+    final endDate = localizations.formatMediumDate(end);
 
-    final startTime =
-        localizations.formatTimeOfDay(
+    final startTime = localizations.formatTimeOfDay(
       TimeOfDay.fromDateTime(start),
     );
 
-    final endTime =
-        localizations.formatTimeOfDay(
-      TimeOfDay.fromDateTime(end),
-    );
+    final endTime = localizations.formatTimeOfDay(TimeOfDay.fromDateTime(end));
 
     if (startDate == endDate) {
       return '$startDate • $startTime – $endTime';
@@ -160,16 +224,13 @@ class _ActivityListScreenState extends State<ActivityListScreen> {
 
   String _formatLocation(Activity activity) {
     final parts = <String>[
-      if (activity.building != null &&
-          activity.building!.trim().isNotEmpty)
+      if (activity.building != null && activity.building!.trim().isNotEmpty)
         activity.building!.trim(),
 
-      if (activity.floor != null &&
-          activity.floor!.trim().isNotEmpty)
+      if (activity.floor != null && activity.floor!.trim().isNotEmpty)
         'Floor ${activity.floor!.trim()}',
 
-      if (activity.roomOrArea != null &&
-          activity.roomOrArea!.trim().isNotEmpty)
+      if (activity.roomOrArea != null && activity.roomOrArea!.trim().isNotEmpty)
         activity.roomOrArea!.trim(),
     ];
 
@@ -244,9 +305,7 @@ class _ActivityListScreenState extends State<ActivityListScreen> {
                           Expanded(
                             child: Text(
                               'Filter activities',
-                              style: Theme.of(sheetContext)
-                                  .textTheme
-                                  .titleLarge
+                              style: Theme.of(sheetContext).textTheme.titleLarge
                                   ?.copyWith(fontWeight: FontWeight.bold),
                             ),
                           ),
@@ -311,8 +370,7 @@ class _ActivityListScreenState extends State<ActivityListScreen> {
                         children: [
                           ChoiceChip(
                             label: const Text('All'),
-                            selected:
-                                draftStatus == _ActivityStatusFilter.all,
+                            selected: draftStatus == _ActivityStatusFilter.all,
                             onSelected: (_) {
                               setSheetState(() {
                                 draftStatus = _ActivityStatusFilter.all;
@@ -357,8 +415,9 @@ class _ActivityListScreenState extends State<ActivityListScreen> {
                               // Apply both sets of choices together. (Category and status filters)
                               onPressed: () {
                                 setState(() {
-                                  _selectedCategories =
-                                      Set<String>.of(draftCategories);
+                                  _selectedCategories = Set<String>.of(
+                                    draftCategories,
+                                  );
                                   _statusFilter = draftStatus;
                                 });
                                 Navigator.of(sheetContext).pop();
@@ -404,11 +463,11 @@ class _ActivityListScreenState extends State<ActivityListScreen> {
         future: _activitiesFuture,
 
         builder: (context, snapshot) {
-          if (snapshot.connectionState ==
-              ConnectionState.waiting) {
-            return const Center(
-              child: CircularProgressIndicator(),
-            );
+          // Only show the full-screen spinner on the first load. On later
+          // refreshes the previous data stays on screen.
+          if (snapshot.connectionState == ConnectionState.waiting &&
+              !snapshot.hasData) {
+            return const Center(child: CircularProgressIndicator());
           }
 
           if (snapshot.hasError) {
@@ -423,22 +482,16 @@ class _ActivityListScreenState extends State<ActivityListScreen> {
                     Icon(
                       Icons.error_outline,
                       size: 64,
-                      color: Theme.of(context)
-                          .colorScheme
-                          .error,
+                      color: Theme.of(context).colorScheme.error,
                     ),
 
                     const SizedBox(height: 16),
 
                     Text(
                       'Could not load activities',
-                      style: Theme.of(context)
-                          .textTheme
-                          .titleLarge
-                          ?.copyWith(
-                            fontWeight:
-                                FontWeight.bold,
-                          ),
+                      style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                        fontWeight: FontWeight.bold,
+                      ),
                       textAlign: TextAlign.center,
                     ),
 
@@ -453,12 +506,8 @@ class _ActivityListScreenState extends State<ActivityListScreen> {
 
                     FilledButton.icon(
                       onPressed: _refreshActivities,
-                      icon: const Icon(
-                        Icons.refresh,
-                      ),
-                      label: const Text(
-                        'Try again',
-                      ),
+                      icon: const Icon(Icons.refresh),
+                      label: const Text('Try again'),
                     ),
                   ],
                 ),
@@ -466,26 +515,21 @@ class _ActivityListScreenState extends State<ActivityListScreen> {
             );
           }
 
-          final activities =
-              snapshot.data ?? const <Activity>[];
+          final activities = snapshot.data ?? const <Activity>[];
 
           if (activities.isEmpty) {
             return RefreshIndicator(
               onRefresh: _refreshActivities,
 
               child: ListView(
-                physics:
-                    const AlwaysScrollableScrollPhysics(),
+                physics: const AlwaysScrollableScrollPhysics(),
 
                 padding: const EdgeInsets.all(24),
 
                 children: const [
                   SizedBox(height: 120),
 
-                  Icon(
-                    Icons.event_busy_outlined,
-                    size: 72,
-                  ),
+                  Icon(Icons.event_busy_outlined, size: 72),
 
                   SizedBox(height: 16),
 
@@ -493,10 +537,7 @@ class _ActivityListScreenState extends State<ActivityListScreen> {
                     'No activities',
                     textAlign: TextAlign.center,
 
-                    style: TextStyle(
-                      fontSize: 20,
-                      fontWeight: FontWeight.bold,
-                    ),
+                    style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
                   ),
 
                   SizedBox(height: 8),
@@ -529,10 +570,7 @@ class _ActivityListScreenState extends State<ActivityListScreen> {
                   const Text(
                     'No matching activities',
                     textAlign: TextAlign.center,
-                    style: TextStyle(
-                      fontSize: 20,
-                      fontWeight: FontWeight.bold,
-                    ),
+                    style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
                   ),
                   const SizedBox(height: 8),
                   const Text(
@@ -555,24 +593,19 @@ class _ActivityListScreenState extends State<ActivityListScreen> {
             onRefresh: _refreshActivities,
 
             child: ListView.separated(
-              physics:
-                  const AlwaysScrollableScrollPhysics(),
+              physics: const AlwaysScrollableScrollPhysics(),
 
               padding: const EdgeInsets.all(16),
 
               // The list now uses only matching activities.
               itemCount: filteredActivities.length,
 
-              separatorBuilder: (_, _) =>
-                  const SizedBox(height: 12),
+              separatorBuilder: (_, _) => const SizedBox(height: 12),
 
               itemBuilder: (context, index) {
-                final activity =
-                    filteredActivities[index];
+                final activity = filteredActivities[index];
 
-                return _buildActivityCard(
-                  activity,
-                );
+                return _buildActivityCard(activity);
               },
             ),
           );
@@ -581,28 +614,21 @@ class _ActivityListScreenState extends State<ActivityListScreen> {
     );
   }
 
-  Widget _buildActivityCard(
-    Activity activity,
-  ) {
+  Widget _buildActivityCard(Activity activity) {
     final expired = _isExpired(activity);
-    // Choose the button label and color from activity's join state.
-    final isJoined = _joinedActivityKeys.contains(_activityJoinKey(activity));
+    // Join / Leave / Full button, or null when none should be shown.
+    final joinButton = _buildJoinButton(activity);
 
-    final normalTextColor =
-        Theme.of(context).colorScheme.onSurface;
+    final normalTextColor = Theme.of(context).colorScheme.onSurface;
 
     final textColor = expired
-        ? Theme.of(context)
-            .colorScheme
-            .onSurface
-            .withValues(alpha: 0.45)
+        ? Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.45)
         : normalTextColor;
 
     final cardColor = expired
-        ? Theme.of(context)
-            .colorScheme
-            .surfaceContainerHighest
-            .withValues(alpha: 0.45)
+        ? Theme.of(
+            context,
+          ).colorScheme.surfaceContainerHighest.withValues(alpha: 0.45)
         : null;
 
     return Card(
@@ -612,13 +638,11 @@ class _ActivityListScreenState extends State<ActivityListScreen> {
         padding: const EdgeInsets.all(16),
 
         child: Column(
-          crossAxisAlignment:
-              CrossAxisAlignment.start,
+          crossAxisAlignment: CrossAxisAlignment.start,
 
           children: [
             Row(
-              crossAxisAlignment:
-                  CrossAxisAlignment.start,
+              crossAxisAlignment: CrossAxisAlignment.start,
 
               children: [
                 CircleAvatar(
@@ -626,29 +650,22 @@ class _ActivityListScreenState extends State<ActivityListScreen> {
                       ? Colors.grey
                       : activity.category.color,
 
-                  child: Icon(
-                    activity.category.icon,
-                    color: Colors.white,
-                  ),
+                  child: Icon(activity.category.icon, color: Colors.white),
                 ),
 
                 const SizedBox(width: 12),
 
                 Expanded(
                   child: Column(
-                    crossAxisAlignment:
-                        CrossAxisAlignment.start,
+                    crossAxisAlignment: CrossAxisAlignment.start,
 
                     children: [
                       Text(
                         activity.title,
 
-                        style: Theme.of(context)
-                            .textTheme
-                            .titleMedium
+                        style: Theme.of(context).textTheme.titleMedium
                             ?.copyWith(
-                              fontWeight:
-                                  FontWeight.bold,
+                              fontWeight: FontWeight.bold,
                               color: textColor,
                             ),
                       ),
@@ -658,9 +675,7 @@ class _ActivityListScreenState extends State<ActivityListScreen> {
                       Text(
                         activity.category.label,
 
-                        style: TextStyle(
-                          color: textColor,
-                        ),
+                        style: TextStyle(color: textColor),
                       ),
 
                       if (expired) ...[
@@ -681,8 +696,7 @@ class _ActivityListScreenState extends State<ActivityListScreen> {
 
                               style: TextStyle(
                                 color: textColor,
-                                fontWeight:
-                                    FontWeight.w600,
+                                fontWeight: FontWeight.w600,
                               ),
                             ),
                           ],
@@ -695,9 +709,7 @@ class _ActivityListScreenState extends State<ActivityListScreen> {
             ),
 
             if (activity.description != null &&
-                activity.description!
-                    .trim()
-                    .isNotEmpty) ...[
+                activity.description!.trim().isNotEmpty) ...[
               const SizedBox(height: 12),
 
               Text(
@@ -705,24 +717,17 @@ class _ActivityListScreenState extends State<ActivityListScreen> {
                 maxLines: 3,
                 overflow: TextOverflow.ellipsis,
 
-                style: TextStyle(
-                  color: textColor,
-                ),
+                style: TextStyle(color: textColor),
               ),
             ],
 
             const SizedBox(height: 16),
 
             Row(
-              crossAxisAlignment:
-                  CrossAxisAlignment.start,
+              crossAxisAlignment: CrossAxisAlignment.start,
 
               children: [
-                Icon(
-                  Icons.schedule_outlined,
-                  size: 20,
-                  color: textColor,
-                ),
+                Icon(Icons.schedule_outlined, size: 20, color: textColor),
 
                 const SizedBox(width: 8),
 
@@ -730,9 +735,7 @@ class _ActivityListScreenState extends State<ActivityListScreen> {
                   child: Text(
                     _formatTimeRange(activity),
 
-                    style: TextStyle(
-                      color: textColor,
-                    ),
+                    style: TextStyle(color: textColor),
                   ),
                 ),
               ],
@@ -741,15 +744,10 @@ class _ActivityListScreenState extends State<ActivityListScreen> {
             const SizedBox(height: 8),
 
             Row(
-              crossAxisAlignment:
-                  CrossAxisAlignment.start,
+              crossAxisAlignment: CrossAxisAlignment.start,
 
               children: [
-                Icon(
-                  Icons.location_on_outlined,
-                  size: 20,
-                  color: textColor,
-                ),
+                Icon(Icons.location_on_outlined, size: 20, color: textColor),
 
                 const SizedBox(width: 8),
 
@@ -757,9 +755,27 @@ class _ActivityListScreenState extends State<ActivityListScreen> {
                   child: Text(
                     _formatLocation(activity),
 
-                    style: TextStyle(
-                      color: textColor,
-                    ),
+                    style: TextStyle(color: textColor),
+                  ),
+                ),
+              ],
+            ),
+
+            const SizedBox(height: 8),
+
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+
+              children: [
+                Icon(Icons.people_outline, size: 20, color: textColor),
+
+                const SizedBox(width: 8),
+
+                Expanded(
+                  child: Text(
+                    _formatParticipants(activity),
+
+                    style: TextStyle(color: textColor),
                   ),
                 ),
               ],
@@ -769,38 +785,23 @@ class _ActivityListScreenState extends State<ActivityListScreen> {
               const SizedBox(height: 16),
 
               Align(
-                alignment:
-                    Alignment.centerRight,
+                alignment: Alignment.centerRight,
 
                 child: Wrap(
                   alignment: WrapAlignment.end,
                   spacing: 8,
                   runSpacing: 8,
                   children: [
-                    // Active activities show a blue Join or red Leave button.
-                    FilledButton.icon(
-                      onPressed: () => _toggleJoin(activity),
-                      style: FilledButton.styleFrom(
-                        backgroundColor: isJoined ? Colors.red : Colors.blue,
-                        foregroundColor: Colors.white,
-                      ),
-                      icon: Icon(isJoined ? Icons.logout : Icons.add),
-                      label: Text(isJoined ? 'Leave' : 'Join'),
-                    ),
+                    // Join, Leave or Full. Hidden on your own activities.
+                    if (joinButton != null) joinButton,
                     FilledButton.icon(
                       onPressed: () {
-                        widget.onViewOnMap(
-                          activity,
-                        );
+                        widget.onViewOnMap(activity);
                       },
 
-                      icon: const Icon(
-                        Icons.map_outlined,
-                      ),
+                      icon: const Icon(Icons.map_outlined),
 
-                      label: const Text(
-                        'View on map',
-                      ),
+                      label: const Text('View on map'),
                     ),
                   ],
                 ),
