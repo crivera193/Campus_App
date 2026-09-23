@@ -1,6 +1,5 @@
 import 'activity_category.dart';
 
-
 /// A temporary, student-created activity displayed on the campus map.
 class Activity {
   const Activity({
@@ -22,6 +21,11 @@ class Activity {
     required this.cancelledAt,
     required this.createdAt,
     required this.updatedAt,
+    this.maxParticipants,
+    this.participantCount = 0,
+    this.hasJoined = false,
+    this.isOwner = false,
+    this.isOpen = true,
   });
 
   final String id;
@@ -42,6 +46,20 @@ class Activity {
   final DateTime? cancelledAt;
   final DateTime createdAt;
   final DateTime updatedAt;
+
+  // Participation data. These come from the activities_with_participation_data
+  // view. Activities loaded straight from the activities table use the
+  // defaults, so existing code that builds an Activity keeps working.
+  final int? maxParticipants;
+  final int participantCount;
+  final bool hasJoined;
+  final bool isOwner;
+
+  // Computed by the database (approved, not cancelled, not ended).
+  final bool isOpen;
+
+  bool get isFull =>
+      maxParticipants != null && participantCount >= maxParticipants!;
 
   ActivityCategory get category => ActivityCategory.fromId(categoryId);
 
@@ -65,6 +83,11 @@ class Activity {
       cancelledAt: _asDateTime(map['cancelled_at']),
       createdAt: DateTime.parse(map['created_at'] as String),
       updatedAt: DateTime.parse(map['updated_at'] as String),
+      maxParticipants: (map['max_participants'] as num?)?.toInt(),
+      participantCount: (map['participant_count'] as num?)?.toInt() ?? 0,
+      hasJoined: map['has_joined'] as bool? ?? false,
+      isOwner: map['is_owner'] as bool? ?? false,
+      isOpen: map['is_open'] as bool? ?? true,
     );
   }
 
@@ -85,9 +108,7 @@ class Activity {
       return double.parse(value);
     }
 
-    throw const FormatException(
-      'Expected a numeric activity coordinate.',
-    );
+    throw const FormatException('Expected a numeric activity coordinate.');
   }
 }
 
@@ -144,9 +165,7 @@ class ActivityDraft {
     }
 
     if (categoryId.trim().isEmpty ||
-        !ActivityCategory.all.any(
-          (category) => category.id == categoryId,
-        )) {
+        !ActivityCategory.all.any((category) => category.id == categoryId)) {
       errors.add('Choose a valid activity category.');
     }
 
