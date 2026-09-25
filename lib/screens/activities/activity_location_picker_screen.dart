@@ -44,7 +44,7 @@ class _ActivityLocationPickerScreenState
         children: [
           MapWidget(
             key: const ValueKey('activity-location-picker-map'),
-            cameraOptions: CameraOptions(
+            viewport: CameraViewportState(
               center: widget.initialLocation,
               zoom: 17.0,
               pitch: 45.0,
