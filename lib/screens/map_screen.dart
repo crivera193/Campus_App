@@ -65,16 +65,13 @@ class MapScreen extends StatefulWidget {
           location.coordinates.lng.toDouble(),
         );
 
-        if (distance <= permanentMarkerAssignmentRadiusInMeters &&
-            distance < nearestDistance) {
+        if (distance <= permanentMarkerAssignmentRadiusInMeters && distance < nearestDistance) {
           nearestDistance = distance;
           nearestLocation = location;
         }
       }
 
-      if (nearestLocation == null) {
-        continue;
-      }
+      if (nearestLocation == null) { continue; }
 
       groupedActivities.putIfAbsent(
         nearestLocation.title,
@@ -163,6 +160,8 @@ class _MapScreenState extends State<MapScreen>
   final Map<String, Activity> _activityAnnotationDataMap = {};
 
   final Map<String, List<Activity>> _permanentMarkerActivitiesMap = {};
+  //saves the time needed to load images from assets
+  final Map<String, Uint8List> _permanentMarkerImageCache = {};
 
   MapboxMap? _mapboxMap;
 
@@ -239,7 +238,7 @@ class _MapScreenState extends State<MapScreen>
 
     await _enableLiveLocation();
 
-    await _addPermanentLocationMarkers();
+    await _setUpPermanentLocationMarkers();
 
     await _setUpActivityMarkers();
   }
@@ -258,52 +257,33 @@ class _MapScreenState extends State<MapScreen>
     );
   }
 
-  Future<void> _addPermanentLocationMarkers() async {
+  String _markerAssetForActivityCount (int count) {
+    if(count >= 10) {return 'assets/litMarkerPlus.png';}
+    if(count == 0) {return 'assets/litMarker0.png';}
+    return 'assets/litMarker$count.png';
+  }
+  // checks the count and see if image is already loaded
+  Future<Uint8List> _loadPermanentMarkerImage(int activityCount) async {
+    final assetPath = _markerAssetForActivityCount(activityCount);
+    // return if image is already loaded
+    final cachedImage = _permanentMarkerImageCache[assetPath];
+    if (cachedImage != null) {
+      return cachedImage;
+    }
+    // if not loaded then load, save, and return it
+    final bytes = await rootBundle.load(assetPath);
+    final imageData = bytes.buffer.asUint8List();
+    _permanentMarkerImageCache[assetPath] = imageData;
+    return imageData;
+  }
+  //Manages the setup of permanent markers, adds tap listeners, creates markers
+  Future<void> _setUpPermanentLocationMarkers() async {
     if (_mapboxMap == null) {
       return;
     }
 
     _permanentLocationAnnotationManager =
         await _mapboxMap!.annotations.createPointAnnotationManager();
-
-    final bytes = await rootBundle.load(
-      'assets/test_marker.png',
-    );
-
-    final imageData = bytes.buffer.asUint8List();
-
-    final markerOptions = customLocations
-        .map(
-          (location) => PointAnnotationOptions(
-            geometry: Point(
-              coordinates: location.coordinates,
-            ),
-            image: imageData,
-            iconSize: 0.3,
-            textField: location.title,
-            textOffset: [
-              0.0,
-              1.5,
-            ],
-          ),
-        )
-        .toList();
-
-    final annotations =
-        await _permanentLocationAnnotationManager!.createMulti(
-      markerOptions,
-    );
-
-    for (var index = 0;
-        index < annotations.length;
-        index++) {
-      final annotationId = annotations[index]?.id;
-
-      if (annotationId != null) {
-        _locationAnnotationDataMap[annotationId] =
-            customLocations[index];
-      }
-    }
 
     _permanentLocationAnnotationManager!.tapEvents(
       onTap: (annotation) {
@@ -318,6 +298,51 @@ class _MapScreenState extends State<MapScreen>
         }
       },
     );
+    await _refreshPermanentLocationMarkers();
+  }
+
+  //redraws markers when count changes
+  Future<void> _refreshPermanentLocationMarkers() async {
+    if (_permanentLocationAnnotationManager == null) { return; }
+    // Implementation for refreshing permanent location markers
+    //this remove old permanent markers
+    await _permanentLocationAnnotationManager?.deleteAll();
+
+    //the ids change when receating
+    //so clear the old id with the location connection
+    _locationAnnotationDataMap.clear();
+
+    final markerOptions = <PointAnnotationOptions>[];
+
+    for (final location in customLocations) {
+      final activitiesAtLocation = _permanentMarkerActivitiesMap[location.title] ?? const <Activity>[];
+
+      final activityCount = activitiesAtLocation.length;
+
+      final imageData = await _loadPermanentMarkerImage(activityCount);
+
+      markerOptions.add(
+        PointAnnotationOptions(
+          geometry: Point(coordinates: location.coordinates),
+          image: imageData,
+          iconSize: 0.2,
+          iconAnchor: IconAnchor.BOTTOM,  //To align the marker with the bottom
+          textField: location.title,
+          textOffset: [0.0, 1.5],
+        ),
+      );
+    }
+
+    final annotations = await _permanentLocationAnnotationManager?.createMulti(markerOptions);
+
+    for (var i = 0; i < annotations!.length; i++) {
+      final annotationId = annotations[i]?.id;
+
+      if (annotationId != null) {
+        _locationAnnotationDataMap[annotationId] = customLocations[i];
+
+      }
+    }
   }
 
   Future<void> _setUpActivityMarkers() async {
@@ -379,113 +404,8 @@ class _MapScreenState extends State<MapScreen>
         campus: 'edinburg',
       );
 
-      // Temporary fake activities for marker testing.
-      final testActivities = <Activity>[
-        Activity(
-          id: 'test-activity-1',
-          creatorId: 'test-user',
-          title: 'Pickup Volleyball',
-          description: 'Anyone can join!',
-          categoryId: 'sports',
-          campus: 'edinburg',
-          latitude: 26.3045,
-          longitude: -98.1740,
-          startsAt: DateTime(2026, 1, 1),
-          endsAt: DateTime(2099, 12, 31),
-          indoorOutdoor: 'outdoor',
-          building: null,
-          floor: null,
-          roomOrArea: 'UTRGV Quad',
-          ticketStatus: 'Approved',
-          cancelledAt: null,
-          createdAt: DateTime.now(),
-          updatedAt: DateTime.now(),
-        ),
-        Activity(
-          id: 'test-activity-2',
-          creatorId: 'test-user',
-          title: 'Study Group',
-          description: 'Studying for exams.',
-          categoryId: 'study',
-          campus: 'edinburg',
-          latitude: 26.30450004,
-          longitude: -98.17399996,
-          startsAt: DateTime(2026, 1, 1),
-          endsAt: DateTime(2099, 12, 31),
-          indoorOutdoor: 'indoor',
-          building: 'Library',
-          floor: '2',
-          roomOrArea: 'Study Room',
-          ticketStatus: 'Approved',
-          cancelledAt: null,
-          createdAt: DateTime.now(),
-          updatedAt: DateTime.now(),
-        ),
-        Activity(
-          id: 'test-activity-3',
-          creatorId: 'test-user',
-          title: 'Card Game',
-          description: 'Come play cards with us!',
-          categoryId: 'social',
-          campus: 'edinburg',
-          latitude: 26.30450008,
-          longitude: -98.17399992,
-          startsAt: DateTime(2026, 1, 1),
-          endsAt: DateTime(2099, 12, 31),
-          indoorOutdoor: 'outdoor',
-          building: null,
-          floor: null,
-          roomOrArea: 'UTRGV Quad',
-          ticketStatus: 'Approved',
-          cancelledAt: null,
-          createdAt: DateTime.now(),
-          updatedAt: DateTime.now(),
-        ),
-        Activity(
-          id: 'test-activity-4',
-          creatorId: 'test-user',
-          title: 'Campus Hangout',
-          description: 'Hanging out and meeting people.',
-          categoryId: 'social',
-          campus: 'edinburg',
-          latitude: 26.3060,
-          longitude: -98.1750,
-          startsAt: DateTime(2026, 1, 1),
-          endsAt: DateTime(2099, 12, 31),
-          indoorOutdoor: 'outdoor',
-          building: null,
-          floor: null,
-          roomOrArea: 'Sundial',
-          ticketStatus: 'Approved',
-          cancelledAt: null,
-          createdAt: DateTime.now(),
-          updatedAt: DateTime.now(),
-        ),
-        Activity(
-          id: 'test-activity-5',
-          creatorId: 'test-user',
-          title: 'Study and Coffee',
-          description: 'Quiet study session.',
-          categoryId: 'study',
-          campus: 'edinburg',
-          latitude: 26.3028,
-          longitude: -98.1725,
-          startsAt: DateTime(2026, 1, 1),
-          endsAt: DateTime(2099, 12, 31),
-          indoorOutdoor: 'indoor',
-          building: 'Student Union',
-          floor: '1',
-          roomOrArea: 'Lounge',
-          ticketStatus: 'Approved',
-          cancelledAt: null,
-          createdAt: DateTime.now(),
-          updatedAt: DateTime.now(),
-        ),
-      ];
-
       final allActivities = [
         ...activities,
-        ...testActivities,
       ];
 
       final groupedActivities =
@@ -505,14 +425,16 @@ class _MapScreenState extends State<MapScreen>
           )
           .toList();
 
-      _permanentMarkerActivitiesMap
-        ..clear()
-        ..addAll(groupedActivities);
-
       if (!mounted ||
           request != _activityRefreshRequest) {
         return;
       }
+
+      _permanentMarkerActivitiesMap
+        ..clear()
+        ..addAll(groupedActivities);
+
+      await _refreshPermanentLocationMarkers(); //activity counts changed, so redraw
 
       await activityManager.deleteAll();
 
@@ -747,58 +669,11 @@ class _MapScreenState extends State<MapScreen>
                     ),
                   ] else ...[
                     const Text(
-                      'Event Table (W.I.P.)',
+                      'There are no sparks nearby right now',
                       style: TextStyle(
-                        fontSize: 20,
-                        fontWeight: FontWeight.bold,
+                        fontSize: 18,
+                        color: Colors.grey,
                       ),
-                    ),
-                    const SizedBox(
-                      height: 8,
-                    ),
-                    DataTable(
-                      columns: [
-                        DataColumn(
-                          label: Text(
-                            'Event Name',
-                          ),
-                        ),
-                        DataColumn(
-                          label: Text(
-                            'Time',
-                          ),
-                        ),
-                      ],
-                      rows: [
-                        DataRow(
-                          cells: [
-                            DataCell(
-                              Text(
-                                'Sample Event 1',
-                              ),
-                            ),
-                            DataCell(
-                              Text(
-                                '11:00 AM',
-                              ),
-                            ),
-                          ],
-                        ),
-                        DataRow(
-                          cells: [
-                            DataCell(
-                              Text(
-                                'Sample Event 2',
-                              ),
-                            ),
-                            DataCell(
-                              Text(
-                                '2:00 PM',
-                              ),
-                            ),
-                          ],
-                        ),
-                      ],
                     ),
                   ],
                   const SizedBox(
@@ -833,21 +708,15 @@ class _MapScreenState extends State<MapScreen>
   }
 
   Future<void> _enableLiveLocation() async {
-    if (_isRequestingLocation) {
-      return;
-    }
+    if (_isRequestingLocation) { return; }
 
-    setState(() {
-      _isRequestingLocation = true;
-    });
-
+    setState(() { _isRequestingLocation = true; });
+     
     try {
       final status =
           await Permission.locationWhenInUse.request();
 
-      if (!mounted) {
-        return;
-      }
+      if (!mounted) { return; }
 
       if (status.isGranted) {
         await _mapboxMap?.location.updateSettings(
@@ -859,9 +728,7 @@ class _MapScreenState extends State<MapScreen>
           ),
         );
 
-        if (!mounted) {
-          return;
-        }
+        if (!mounted) { return; }
 
         setState(() {
           _viewport =
@@ -872,14 +739,11 @@ class _MapScreenState extends State<MapScreen>
                 FollowPuckViewportStateBearingHeading(),
           );
         });
-
         return;
       }
 
-      if (status.isPermanentlyDenied ||
-          status.isRestricted) {
+      if (status.isPermanentlyDenied || status.isRestricted) {
         _showLocationSettingsMessage();
-
         return;
       }
 
@@ -936,9 +800,7 @@ class _MapScreenState extends State<MapScreen>
       // the location validation.
     }
 
-    if (!mounted) {
-      return;
-    }
+    if (!mounted) { return; }
 
     final created =
         await Navigator.of(context).push<bool>(

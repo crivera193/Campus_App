@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:mapbox_maps_flutter/mapbox_maps_flutter.dart';
 
@@ -18,16 +20,81 @@ class _ActivityLocationPickerScreenState
     extends State<ActivityLocationPickerScreen> {
   late Point _selectedLocation;
 
+  MapboxMap? _mapboxMap;
+  PointAnnotationManager? _pointAnnotationManager;  //control pin
+  PointAnnotation? _selectedPin;                    //pin on the map
+  Uint8List? _pinImage;                             //the image for the pin
+
   @override
   void initState() {
     super.initState();
     _selectedLocation = widget.initialLocation;
   }
 
-  void _onMapTap(MapContentGestureContext context) {
-    setState(() {
+  Future<Uint8List> _createPinImage() async {
+    // THis creates the pin image
+    const double size = 110;
+    final recorder = ui.PictureRecorder();
+    final canvas = ui.Canvas(recorder);
+
+    final textPainter = TextPainter(
+      textDirection: ui.TextDirection.ltr, );
+    
+    textPainter.text = TextSpan(
+      text: String.fromCharCode(Icons.location_pin.codePoint),
+      style: TextStyle(
+        fontSize: size,
+        color: Colors.red,
+        fontFamily: Icons.location_pin.fontFamily,
+        package: Icons.location_pin.fontPackage,
+      ),
+    );
+    textPainter.layout();
+    textPainter.paint(
+      canvas,
+      Offset((size - textPainter.width) / 2, (size - textPainter.height) / 2),
+    );
+
+    final picture = recorder.endRecording();
+    final image = await picture.toImage(size.toInt(), size.toInt());
+    final byteData = await image.toByteData(format: ui.ImageByteFormat.png);
+    return byteData!.buffer.asUint8List();
+  }
+
+  Future<void> _onMapCreated(MapboxMap mapboxMap) async {
+  _mapboxMap = mapboxMap;
+  //keeps the point on the map
+  _pointAnnotationManager =
+      await mapboxMap.annotations.createPointAnnotationManager();
+
+  _pinImage = await _createPinImage();
+  }
+
+  Future<void> _onMapTap(MapContentGestureContext context) async {
       _selectedLocation = context.point;
-    });
+
+      await _movePinToSelectedLocation();
+  }
+
+  Future<void> _movePinToSelectedLocation() async {
+    if (_pointAnnotationManager == null || _pinImage == null) return;
+
+    // If no pin yet created, create one
+    if (_selectedPin == null) {
+      _selectedPin = await _pointAnnotationManager!.create(
+        PointAnnotationOptions(
+          geometry: _selectedLocation,  //grabs the log/lat
+          image: _pinImage,
+          iconSize: 1.0,
+          iconAnchor: IconAnchor.BOTTOM,
+          ),
+        );
+    } else {
+      // If pin already exists, update its position
+      _selectedPin!.geometry = _selectedLocation;
+
+      await _pointAnnotationManager!.update(_selectedPin!);
+    }
   }
 
   void _confirmLocation() {
@@ -44,6 +111,7 @@ class _ActivityLocationPickerScreenState
         children: [
           MapWidget(
             key: const ValueKey('activity-location-picker-map'),
+            onMapCreated: _onMapCreated,
             viewport: CameraViewportState(
               center: widget.initialLocation,
               zoom: 17.0,
@@ -52,17 +120,6 @@ class _ActivityLocationPickerScreenState
             ),
             onTapListener: _onMapTap,
           ),
-
-          const IgnorePointer(
-            child: Center(
-              child: Icon(
-                Icons.location_pin,
-                size: 48,
-                color: Colors.red,
-              ),
-            ),
-          ),
-
           Positioned(
             left: 16,
             right: 16,

@@ -45,7 +45,7 @@ final List<LocationData> customLocations = [
   ),
 
   LocationData(
-    title: 'student Union',
+    title: 'Student Union',
     description: 'PlaceHolder here',
     coordinates: Position(-98.1752388, 26.305472),
   ),
