@@ -65,10 +65,13 @@ class _UsernameSelectionScreenState extends State<UsernameSelectionScreen> {
           );
         }
       }
-      await Supabase.instance.client
-          .from('profiles')
-          .update({'username': _selected})
-          .eq('id', user.id);
+      final result = await Supabase.instance.client.rpc(
+        'set_my_username',
+        params: {'candidate': _selected},
+      );
+      if (result != true) {
+        throw StateError('Could not save your username. Please try again.');
+      }
       await Supabase.instance.client.auth.updateUser(
         UserAttributes(
           data: {'username': _selected, 'username_pending': false},
