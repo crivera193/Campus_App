@@ -20,6 +20,9 @@ class _AdminDashboardState extends ConsumerState<AdminDashboard> {
   Activity? _selectedActivity;
 
   int _mapFocusRequest = 0;
+  int _activityRefreshRequest = 0;
+
+  void _refreshMapActivities() => setState(() => _activityRefreshRequest++);
 
   /// Keeps track of tickets currently being approved/rejected.
   /// This prevents the admin from pressing a button multiple times.
@@ -28,6 +31,7 @@ class _AdminDashboardState extends ConsumerState<AdminDashboard> {
   void _onNavigationTapped(int index) {
     setState(() {
       _selectedIndex = index;
+      if (index == 2) _activityRefreshRequest++;
     });
   }
 
@@ -170,12 +174,16 @@ class _AdminDashboardState extends ConsumerState<AdminDashboard> {
           _buildTicketScreen(),
 
           // Index 1
-          ActivityListScreen(onViewOnMap: _showActivityOnMap),
+          ActivityListScreen(
+            onViewOnMap: _showActivityOnMap,
+            onMapRefreshRequested: _refreshMapActivities,
+          ),
 
           // Index 2
           MapScreen(
             selectedActivity: _selectedActivity,
             focusRequest: _mapFocusRequest,
+            refreshRequest: _activityRefreshRequest,
           ),
         ],
       ),

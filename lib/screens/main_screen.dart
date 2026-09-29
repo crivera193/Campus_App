@@ -15,12 +15,15 @@ class _MainScreenState extends State<MainScreen> {
   int _selectedIndex = 0;
   Activity? _selectedActivity;
   int _mapFocusRequest = 0;
+  int _activityRefreshRequest = 0;
 
   void _showActivityOnMap(Activity activity) => setState(() {
     _selectedActivity = activity;
     _mapFocusRequest++;
     _selectedIndex = 0;
   });
+
+  void _refreshMapActivities() => setState(() => _activityRefreshRequest++);
 
   Future<void> _openCreateSpark() async {
     await Navigator.of(context).push(
@@ -37,10 +40,14 @@ class _MainScreenState extends State<MainScreen> {
       MapScreen(
         selectedActivity: _selectedActivity,
         focusRequest: _mapFocusRequest,
+        refreshRequest: _activityRefreshRequest,
       ),
       const ExploreScreen(),
       const SizedBox.shrink(),
-      ActivityListScreen(onViewOnMap: _showActivityOnMap),
+      ActivityListScreen(
+        onViewOnMap: _showActivityOnMap,
+        onMapRefreshRequested: _refreshMapActivities,
+      ),
       const UserScreen(),
     ];
     return Scaffold(
@@ -117,7 +124,10 @@ class _MainScreenState extends State<MainScreen> {
 
   Widget _navItem(int index, IconData icon, String label) => Expanded(
     child: InkWell(
-      onTap: () => setState(() => _selectedIndex = index),
+      onTap: () => setState(() {
+        _selectedIndex = index;
+        if (index == 0) _activityRefreshRequest++;
+      }),
       child: SizedBox(
         height: 66,
         child: Column(

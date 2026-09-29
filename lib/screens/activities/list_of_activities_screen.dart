@@ -8,9 +8,14 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 enum _ActivityStatusFilter { upcoming, today, tomorrow, thisWeek, past, all }
 
 class ActivityListScreen extends StatefulWidget {
-  const ActivityListScreen({super.key, required this.onViewOnMap});
+  const ActivityListScreen({
+    super.key,
+    required this.onViewOnMap,
+    this.onMapRefreshRequested,
+  });
 
   final ValueChanged<Activity> onViewOnMap;
+  final VoidCallback? onMapRefreshRequested;
 
   @override
   State<ActivityListScreen> createState() => _ActivityListScreenState();
@@ -75,6 +80,7 @@ class _ActivityListScreenState extends State<ActivityListScreen> {
       } else {
         await _activityRepository.joinActivity(activity.id);
       }
+      widget.onMapRefreshRequested?.call();
     } on PostgrestException catch (error) {
       // 23505 = duplicate primary key, meaning the user already joined.
       errorMessage = error.code == '23505'
@@ -150,10 +156,104 @@ class _ActivityListScreenState extends State<ActivityListScreen> {
     final count = activity.participantCount;
     final max = activity.maxParticipants;
 
-    final noun = (count == 1 && max == null) ? 'person' : 'people';
+    final noun = count == 1 && max == null ? 'person' : 'people';
     final amount = max == null ? '$count' : '$count / $max';
 
     return '$amount $noun joined';
+  }
+
+  Future<void> _showParticipants(Activity activity) async {
+    final participants = _activityRepository.fetchParticipantUsernames(
+      activity.id,
+    );
+
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      builder: (sheetContext) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
+          child: ConstrainedBox(
+            constraints: BoxConstraints(
+              maxHeight: MediaQuery.sizeOf(sheetContext).height * 0.65,
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'People joined',
+                  style: Theme.of(sheetContext).textTheme.titleLarge,
+                ),
+                const SizedBox(height: 12),
+                Flexible(
+                  child: FutureBuilder<List<String>>(
+                    future: participants,
+                    builder: (context, snapshot) {
+                      if (snapshot.connectionState != ConnectionState.done) {
+                        return const Center(
+                          child: Padding(
+                            padding: EdgeInsets.all(24),
+                            child: CircularProgressIndicator(),
+                          ),
+                        );
+                      }
+                      if (snapshot.hasError) {
+                        return const Padding(
+                          padding: EdgeInsets.symmetric(vertical: 20),
+                          child: Text('Could not load participants.'),
+                        );
+                      }
+
+                      final usernames = snapshot.data ?? const <String>[];
+                      if (usernames.isEmpty) {
+                        return Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 20),
+                          child: Text(
+                            activity.participantCount == 0
+                                ? 'No one has joined yet.'
+                                : 'Participant usernames are not available.',
+                          ),
+                        );
+                      }
+
+                      return ListView.builder(
+                        shrinkWrap: true,
+                        itemCount:
+                            usernames.length +
+                            (usernames.length < activity.participantCount
+                                ? 1
+                                : 0),
+                        itemBuilder: (context, index) {
+                          if (index == usernames.length) {
+                            return const ListTile(
+                              dense: true,
+                              title: Text(
+                                'Some participant usernames are unavailable.',
+                              ),
+                            );
+                          }
+                          final username = usernames[index];
+                          return ListTile(
+                            leading: const Icon(Icons.person_outline),
+                            title: Text(
+                              username.startsWith('@')
+                                  ? username
+                                  : '@$username',
+                            ),
+                          );
+                        },
+                      );
+                    },
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
   }
 
   bool _isExpired(Activity activity) {
@@ -287,6 +387,7 @@ class _ActivityListScreenState extends State<ActivityListScreen> {
       _selectedCategories = <String>{};
       _statusFilter = _ActivityStatusFilter.upcoming;
     });
+    widget.onMapRefreshRequested?.call();
   }
 
   // Show every category defined in ActivityCategory.all, even when
@@ -393,7 +494,10 @@ class _ActivityListScreenState extends State<ActivityListScreen> {
                               });
                             },
                           ),
-                          for (final filter in _ActivityStatusFilter.values)
+                          for (final filter
+                              in _ActivityStatusFilter.values.where(
+                                (filter) => filter != _ActivityStatusFilter.all,
+                              ))
                             ChoiceChip(
                               label: Text(switch (filter) {
                                 _ActivityStatusFilter.upcoming => 'Upcoming',
@@ -430,6 +534,7 @@ class _ActivityListScreenState extends State<ActivityListScreen> {
                                   );
                                   _statusFilter = draftStatus;
                                 });
+                                widget.onMapRefreshRequested?.call();
                                 Navigator.of(sheetContext).pop();
                               },
                               child: const Text('Apply filters'),
@@ -782,10 +887,19 @@ class _ActivityListScreenState extends State<ActivityListScreen> {
                 const SizedBox(width: 8),
 
                 Expanded(
-                  child: Text(
-                    _formatParticipants(activity),
-
-                    style: TextStyle(color: textColor),
+                  child: InkWell(
+                    onTap: () => _showParticipants(activity),
+                    borderRadius: BorderRadius.circular(4),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 2),
+                      child: Text(
+                        _formatParticipants(activity),
+                        style: TextStyle(
+                          color: textColor,
+                          decoration: TextDecoration.underline,
+                        ),
+                      ),
+                    ),
                   ),
                 ),
               ],

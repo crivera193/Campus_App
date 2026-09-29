@@ -21,7 +21,7 @@ class ActivityRepository {
     final activeAt = (now ?? DateTime.now()).toUtc().toIso8601String();
 
     final rows = await _supabase
-        .from('activities')
+        .from('activities_with_participation_data')
         .select()
         .eq('ticket_status', 'Approved')
         .isFilter('cancelled_at', null)
@@ -35,13 +35,25 @@ class ActivityRepository {
         .toList();
   }
 
+  /// Returns participant usernames for an activity visible in the recent
+  /// Events window. The RPC returns usernames only, respecting profile RLS.
+  Future<List<String>> fetchParticipantUsernames(String activityId) async {
+    final rows = await _supabase.rpc(
+      'activity_participant_usernames',
+      params: {'p_activity_id': activityId},
+    );
+
+    return (rows as List<dynamic>)
+        .map((row) => (row as Map<String, dynamic>)['username'] as String)
+        .toList();
+  }
+
   /// Returns approved activities that are either currently
   /// active or ended within the last 3 days.
   ///
   /// This is used by the student activity list. It reads from the
   /// activities_with_participation_data view, so each Activity also carries
   /// participant_count, has_joined, is_owner and is_open.
-  /// The map continues to use fetchActiveActivities().
   Future<List<Activity>> fetchRecentAndActiveActivities({
     required String campus,
     DateTime? now,
