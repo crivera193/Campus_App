@@ -1,6 +1,7 @@
 import 'package:campus_app/models/activity.dart';
 import 'package:campus_app/models/activity_category.dart';
 import 'package:campus_app/services/activity_repository.dart';
+import 'package:campus_app/services/campus_location_resolver.dart';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:campus_app/screens/activities/activity_location_picker_screen.dart';
@@ -41,6 +42,7 @@ class _CreateActivityScreenState extends State<CreateActivityScreen> {
   String? _locationError;
   String? _submissionError;
   bool _isSubmitting = false;
+  bool _startNow = true;
 
   @override
   void initState() {
@@ -82,6 +84,8 @@ class _CreateActivityScreenState extends State<CreateActivityScreen> {
     setState(() {
       _latitude = selectedLocation.coordinates.lat.toDouble();
       _longitude = selectedLocation.coordinates.lng.toDouble();
+      _buildingController.text =
+          CampusLocationResolver.resolve(_latitude!, _longitude!) ?? '';
       _locationError = null;
     });
   }
@@ -134,12 +138,20 @@ class _CreateActivityScreenState extends State<CreateActivityScreen> {
     setState(() {
       _locationError = hasLocation
           ? null
-          : 'A map location is required to create an activity.';
+          : 'Choose a location on the map to create this Spark.';
       _submissionError = null;
     });
 
     if (!formIsValid || !hasLocation) return;
 
+    // Resolve “Now” at submission time so a long-open form cannot create a stale Spark.
+    final effectiveStart = _startNow ? DateTime.now() : _startsAt;
+    final duration = _endsAt.difference(_startsAt);
+    final effectiveEnd = _startNow ? effectiveStart.add(duration) : _endsAt;
+    final resolvedBuilding = CampusLocationResolver.resolve(
+      _latitude!,
+      _longitude!,
+    );
     final draft = ActivityDraft(
       title: _titleController.text.trim(),
       description: _optionalValue(_descriptionController.text),
@@ -147,10 +159,10 @@ class _CreateActivityScreenState extends State<CreateActivityScreen> {
       campus: widget.campus,
       latitude: _latitude ?? 0,
       longitude: _longitude ?? 0,
-      startsAt: _startsAt,
-      endsAt: _endsAt,
+      startsAt: effectiveStart,
+      endsAt: effectiveEnd,
       indoorOutdoor: _indoorOutdoor ?? '',
-      building: _optionalValue(_buildingController.text),
+      building: resolvedBuilding ?? _optionalValue(_buildingController.text),
       floor: _optionalValue(_floorController.text),
       roomOrArea: _optionalValue(_roomOrAreaController.text),
       maxParticipants: int.tryParse(_maxParticipantsController.text.trim()),
@@ -167,7 +179,7 @@ class _CreateActivityScreenState extends State<CreateActivityScreen> {
 
     final now = DateTime.now();
 
-    if (_startsAt.isBefore(now.subtract(const Duration(minutes: 1)))) {
+    if (!_startNow && _startsAt.isBefore(now)) {
       setState(() {
         _submissionError = 'Choose a start time that is now or in the future.';
       });
@@ -245,7 +257,7 @@ class _CreateActivityScreenState extends State<CreateActivityScreen> {
               ),
               const SizedBox(height: 8),
               const Text(
-                'Activities are temporary and appear on the campus map until their end time.',
+                'Sparks appear on the map until their end time. Choose any valid map location.',
               ),
               const SizedBox(height: 24),
 
@@ -426,19 +438,45 @@ class _CreateActivityScreenState extends State<CreateActivityScreen> {
               _sectionTitle(context, 'When'),
               const SizedBox(height: 8),
 
-              _DateTimeSelector(
-                label: 'Starts',
-                value: _formatDateTime(_startsAt),
-                onPressed: () => _selectDateTime(isStart: true),
+              SegmentedButton<bool>(
+                segments: const [
+                  ButtonSegment(
+                    value: true,
+                    label: Text('Now'),
+                    icon: Icon(Icons.flash_on),
+                  ),
+                  ButtonSegment(
+                    value: false,
+                    label: Text('Choose time'),
+                    icon: Icon(Icons.schedule),
+                  ),
+                ],
+                selected: {_startNow},
+                onSelectionChanged: (selection) => setState(() {
+                  _startNow = selection.first;
+                  if (!_startNow && _startsAt.isBefore(DateTime.now()))
+                    _startsAt = DateTime.now().add(const Duration(minutes: 5));
+                  _endsAt = _startsAt.add(const Duration(hours: 1));
+                }),
               ),
 
-              const SizedBox(height: 12),
+              if (!_startNow) ...[
+                const SizedBox(height: 12),
 
-              _DateTimeSelector(
-                label: 'Ends',
-                value: _formatDateTime(_endsAt),
-                onPressed: () => _selectDateTime(isStart: false),
-              ),
+                _DateTimeSelector(
+                  label: 'Starts',
+                  value: _formatDateTime(_startsAt),
+                  onPressed: () => _selectDateTime(isStart: true),
+                ),
+
+                const SizedBox(height: 12),
+
+                _DateTimeSelector(
+                  label: 'Ends',
+                  value: _formatDateTime(_endsAt),
+                  onPressed: () => _selectDateTime(isStart: false),
+                ),
+              ],
 
               if (_submissionError != null) ...[
                 const SizedBox(height: 20),
@@ -528,7 +566,7 @@ class _LocationCard extends StatelessWidget {
               Expanded(
                 child: Text(
                   hasLocation
-                      ? 'Location selected on the $campusLabel campus.\n'
+                      ? 'Location selected. $campusLabel is the campus label; place this Spark anywhere.\n'
                             'Latitude ${latitude!.toStringAsFixed(6)}, '
                             'longitude ${longitude!.toStringAsFixed(6)}.'
                       : 'Choose where your activity will take place.',

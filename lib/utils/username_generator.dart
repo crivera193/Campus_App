@@ -67,7 +67,22 @@ class UsernameGenerator {
       second = _nouns[_random.nextInt(_nouns.length)];
     } while (first == second);
 
+    // Keep the format used by the existing profile trigger and username RPC.
     return '${first}_$second';
+  }
+
+  static Future<List<String>> generateOptions() async {
+    final supabase = Supabase.instance.client;
+    final options = <String>{};
+    while (options.length < 3) {
+      final candidate = _generateCandidate();
+      final available = await supabase.rpc(
+        'is_username_available',
+        params: {'candidate': candidate},
+      );
+      if (available == true) options.add(candidate);
+    }
+    return options.toList();
   }
 
   static Future<String> generateUnique() async {
@@ -78,9 +93,7 @@ class UsernameGenerator {
 
       final available = await supabase.rpc(
         'is_username_available',
-        params: {
-          'candidate': username,
-        },
+        params: {'candidate': username},
       );
 
       if (available == true) {

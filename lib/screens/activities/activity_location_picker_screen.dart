@@ -2,6 +2,7 @@ import 'dart:typed_data';
 import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:mapbox_maps_flutter/mapbox_maps_flutter.dart';
+import 'package:permission_handler/permission_handler.dart';
 
 class ActivityLocationPickerScreen extends StatefulWidget {
   const ActivityLocationPickerScreen({
@@ -21,14 +22,26 @@ class _ActivityLocationPickerScreenState
   late Point _selectedLocation;
 
   MapboxMap? _mapboxMap;
-  PointAnnotationManager? _pointAnnotationManager;  //control pin
-  PointAnnotation? _selectedPin;                    //pin on the map
-  Uint8List? _pinImage;                             //the image for the pin
+  PointAnnotationManager? _pointAnnotationManager; //control pin
+  PointAnnotation? _selectedPin; //pin on the map
+  Uint8List? _pinImage; //the image for the pin
+  late ViewportState _viewport;
+  bool _userCentered = false;
+  bool _requestingLocation = false;
+  static final Point _edinburgCampus = Point(
+    coordinates: Position(-98.174165, 26.304551),
+  );
 
   @override
   void initState() {
     super.initState();
     _selectedLocation = widget.initialLocation;
+    _viewport = CameraViewportState(
+      center: widget.initialLocation,
+      zoom: 16.0,
+      pitch: 0.0,
+      bearing: 0.0,
+    );
   }
 
   Future<Uint8List> _createPinImage() async {
@@ -37,9 +50,8 @@ class _ActivityLocationPickerScreenState
     final recorder = ui.PictureRecorder();
     final canvas = ui.Canvas(recorder);
 
-    final textPainter = TextPainter(
-      textDirection: ui.TextDirection.ltr, );
-    
+    final textPainter = TextPainter(textDirection: ui.TextDirection.ltr);
+
     textPainter.text = TextSpan(
       text: String.fromCharCode(Icons.location_pin.codePoint),
       style: TextStyle(
@@ -62,18 +74,64 @@ class _ActivityLocationPickerScreenState
   }
 
   Future<void> _onMapCreated(MapboxMap mapboxMap) async {
-  _mapboxMap = mapboxMap;
-  //keeps the point on the map
-  _pointAnnotationManager =
-      await mapboxMap.annotations.createPointAnnotationManager();
+    _mapboxMap = mapboxMap;
+    //keeps the point on the map
+    _pointAnnotationManager = await mapboxMap.annotations
+        .createPointAnnotationManager();
 
-  _pinImage = await _createPinImage();
+    _pinImage = await _createPinImage();
+  }
+
+  Future<void> _toggleCenter() async {
+    if (_userCentered) {
+      setState(() {
+        _userCentered = false;
+        _viewport = CameraViewportState(
+          center: _edinburgCampus,
+          zoom: 16.0,
+          pitch: 0.0,
+          bearing: 0.0,
+        );
+      });
+      return;
+    }
+    if (_requestingLocation) return;
+    setState(() => _requestingLocation = true);
+    try {
+      final permission = await Permission.locationWhenInUse.request();
+      if (!mounted) return;
+      if (!permission.isGranted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Allow location access to center on yourself.'),
+          ),
+        );
+        return;
+      }
+      await _mapboxMap?.location.updateSettings(
+        LocationComponentSettings(
+          enabled: true,
+          pulsingEnabled: true,
+          showAccuracyRing: true,
+        ),
+      );
+      setState(() {
+        _userCentered = true;
+        _viewport = const FollowPuckViewportState(
+          zoom: 16.0,
+          pitch: 0.0,
+          bearing: FollowPuckViewportStateBearingHeading(),
+        );
+      });
+    } finally {
+      if (mounted) setState(() => _requestingLocation = false);
+    }
   }
 
   Future<void> _onMapTap(MapContentGestureContext context) async {
-      _selectedLocation = context.point;
+    _selectedLocation = context.point;
 
-      await _movePinToSelectedLocation();
+    await _movePinToSelectedLocation();
   }
 
   Future<void> _movePinToSelectedLocation() async {
@@ -83,12 +141,12 @@ class _ActivityLocationPickerScreenState
     if (_selectedPin == null) {
       _selectedPin = await _pointAnnotationManager!.create(
         PointAnnotationOptions(
-          geometry: _selectedLocation,  //grabs the log/lat
+          geometry: _selectedLocation, //grabs the log/lat
           image: _pinImage,
           iconSize: 1.0,
           iconAnchor: IconAnchor.BOTTOM,
-          ),
-        );
+        ),
+      );
     } else {
       // If pin already exists, update its position
       _selectedPin!.geometry = _selectedLocation;
@@ -104,21 +162,35 @@ class _ActivityLocationPickerScreenState
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Choose activity location'),
-      ),
+      appBar: AppBar(title: const Text('Choose activity location')),
       body: Stack(
         children: [
           MapWidget(
             key: const ValueKey('activity-location-picker-map'),
             onMapCreated: _onMapCreated,
-            viewport: CameraViewportState(
-              center: widget.initialLocation,
-              zoom: 17.0,
-              pitch: 45.0,
-              bearing: 0.0,
-            ),
+            viewport: _viewport,
             onTapListener: _onMapTap,
+          ),
+          Positioned(
+            top: 16,
+            right: 16,
+            child: SafeArea(
+              child: Material(
+                color: Colors.white,
+                shape: const CircleBorder(),
+                elevation: 3,
+                child: IconButton(
+                  tooltip: _userCentered
+                      ? 'Center on UTRGV campus'
+                      : 'Center on my location',
+                  onPressed: _requestingLocation ? null : _toggleCenter,
+                  icon: Icon(
+                    _userCentered ? Icons.school_outlined : Icons.my_location,
+                    color: const Color(0xFF2585D5),
+                  ),
+                ),
+              ),
+            ),
           ),
           Positioned(
             left: 16,

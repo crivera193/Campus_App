@@ -5,7 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 // Controls which activity dates appear in the filtered list.
-enum _ActivityStatusFilter { all, active, ended }
+enum _ActivityStatusFilter { upcoming, today, tomorrow, thisWeek, past, all }
 
 class ActivityListScreen extends StatefulWidget {
   const ActivityListScreen({super.key, required this.onViewOnMap});
@@ -30,12 +30,12 @@ class _ActivityListScreenState extends State<ActivityListScreen> {
   Set<String> _selectedCategories = <String>{};
 
   // this show all activities until the user chooses a status filter.
-  _ActivityStatusFilter _statusFilter = _ActivityStatusFilter.all;
+  _ActivityStatusFilter _statusFilter = _ActivityStatusFilter.upcoming;
 
   // Used to highlight the filter button when a filter is active.
   bool get _hasActiveFilters =>
       _selectedCategories.isNotEmpty ||
-      _statusFilter != _ActivityStatusFilter.all;
+      _statusFilter != _ActivityStatusFilter.upcoming;
 
   @override
   void initState() {
@@ -242,7 +242,7 @@ class _ActivityListScreenState extends State<ActivityListScreen> {
         '${activity.longitude.toStringAsFixed(5)}';
   }
 
-  // Apply category and status filters locally to the fetched activities.
+  // Apply category and date filters locally to the fetched activities.
   // Multiple selected categories work as OR; category and status work as AND.
   List<Activity> _filterActivities(List<Activity> activities) {
     return activities.where((activity) {
@@ -253,13 +253,29 @@ class _ActivityListScreenState extends State<ActivityListScreen> {
 
       final expired = _isExpired(activity);
 
-      if (_statusFilter == _ActivityStatusFilter.active && expired) {
+      final now = DateTime.now();
+      final today = DateTime(now.year, now.month, now.day);
+      final tomorrow = today.add(const Duration(days: 1));
+      final nextDay = tomorrow.add(const Duration(days: 1));
+      final weekEnd = today.add(Duration(days: 8 - today.weekday));
+      if (_statusFilter == _ActivityStatusFilter.past && !expired) return false;
+      if (_statusFilter == _ActivityStatusFilter.upcoming && expired)
         return false;
-      }
-
-      if (_statusFilter == _ActivityStatusFilter.ended && !expired) {
+      if (_statusFilter == _ActivityStatusFilter.today &&
+          (expired ||
+              activity.startsAt.isBefore(today) ||
+              !activity.startsAt.isBefore(tomorrow)))
         return false;
-      }
+      if (_statusFilter == _ActivityStatusFilter.tomorrow &&
+          (expired ||
+              activity.startsAt.isBefore(tomorrow) ||
+              !activity.startsAt.isBefore(nextDay)))
+        return false;
+      if (_statusFilter == _ActivityStatusFilter.thisWeek &&
+          (expired ||
+              activity.startsAt.isBefore(today) ||
+              !activity.startsAt.isBefore(weekEnd)))
+        return false;
 
       return true;
     }).toList();
@@ -269,7 +285,7 @@ class _ActivityListScreenState extends State<ActivityListScreen> {
   void _clearFilters() {
     setState(() {
       _selectedCategories = <String>{};
-      _statusFilter = _ActivityStatusFilter.all;
+      _statusFilter = _ActivityStatusFilter.upcoming;
     });
   }
 
@@ -358,12 +374,12 @@ class _ActivityListScreenState extends State<ActivityListScreen> {
 
                       const SizedBox(height: 24),
                       Text(
-                        'Activity status',
+                        'Event dates',
                         style: Theme.of(sheetContext).textTheme.titleMedium,
                       ),
                       const SizedBox(height: 12),
 
-                      // Select exactly one activity status at a time. It being the all, active, or ended filter.
+                      // Date choices all feed the same local filtering path.
                       Wrap(
                         spacing: 8,
                         runSpacing: 4,
@@ -377,26 +393,20 @@ class _ActivityListScreenState extends State<ActivityListScreen> {
                               });
                             },
                           ),
-                          ChoiceChip(
-                            label: const Text('Active'),
-                            selected:
-                                draftStatus == _ActivityStatusFilter.active,
-                            onSelected: (_) {
-                              setSheetState(() {
-                                draftStatus = _ActivityStatusFilter.active;
-                              });
-                            },
-                          ),
-                          ChoiceChip(
-                            label: const Text('Ended'),
-                            selected:
-                                draftStatus == _ActivityStatusFilter.ended,
-                            onSelected: (_) {
-                              setSheetState(() {
-                                draftStatus = _ActivityStatusFilter.ended;
-                              });
-                            },
-                          ),
+                          for (final filter in _ActivityStatusFilter.values)
+                            ChoiceChip(
+                              label: Text(switch (filter) {
+                                _ActivityStatusFilter.upcoming => 'Upcoming',
+                                _ActivityStatusFilter.today => 'Today',
+                                _ActivityStatusFilter.tomorrow => 'Tomorrow',
+                                _ActivityStatusFilter.thisWeek => 'This week',
+                                _ActivityStatusFilter.past => 'Past events',
+                                _ActivityStatusFilter.all => 'All',
+                              }),
+                              selected: draftStatus == filter,
+                              onSelected: (_) =>
+                                  setSheetState(() => draftStatus = filter),
+                            ),
                         ],
                       ),
 
@@ -442,7 +452,7 @@ class _ActivityListScreenState extends State<ActivityListScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Activities'),
+        title: const Text('Events'),
         // The filter button is on the top right.
         // AppBar manage the normal back button on the left automatically.
         actions: [

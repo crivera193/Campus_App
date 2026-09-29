@@ -75,6 +75,8 @@ flutter:
       - assets/litMarker8.png
       - assets/litMarker9.png
       - assets/litMarkerPlus.png
+      - assets/Bon the friendly marshmallow.png
+      - assets/UTRGV_Edinburg_mapskin.png
   #   - images/a_dot_ham.jpeg
 
   # An image asset can refer to one or more resolution-specific "variants", see

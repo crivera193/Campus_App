@@ -5,6 +5,7 @@ import 'package:campus_app/screens/admin_dashboard.dart';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:campus_app/screens/main_screen.dart';
+import 'package:campus_app/screens/username_selection_screen.dart';
 
 class AuthGate extends StatefulWidget {
   const AuthGate({super.key});
@@ -63,7 +64,7 @@ class _AuthGateState extends State<AuthGate> {
   Future<String> _loadRole(String userId) async {
     final profile = await _supabase
         .from('profiles')
-        .select('role')
+        .select('role, username')
         .eq('id', userId)
         .single();
 
@@ -73,7 +74,13 @@ class _AuthGateState extends State<AuthGate> {
       throw StateError('No account role was found for this user.');
     }
 
-    return role;
+    final username = profile['username'] as String?;
+    final pendingSelection =
+        _supabase.auth.currentUser?.id == userId &&
+        _supabase.auth.currentUser?.userMetadata?['username_pending'] == true;
+    return pendingSelection || username == null || username.trim().isEmpty
+        ? 'username_required'
+        : role;
   }
 
   void _retryRoleLookup() {
@@ -133,6 +140,9 @@ class _AuthGateState extends State<AuthGate> {
           case 'student':
             return const MainScreen();
 
+          case 'username_required':
+            return const UsernameSelectionScreen();
+
           case 'admin':
             return const AdminDashboard();
 
@@ -155,11 +165,7 @@ class _LoadingScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return const Scaffold(
-      body: Center(
-        child: CircularProgressIndicator(),
-      ),
-    );
+    return const Scaffold(body: Center(child: CircularProgressIndicator()));
   }
 }
 
@@ -186,32 +192,23 @@ class _ErrorScreen extends StatelessWidget {
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                const Icon(
-                  Icons.error_outline,
-                  size: 64,
-                ),
+                const Icon(Icons.error_outline, size: 64),
                 const SizedBox(height: 20),
                 Text(
                   title,
                   textAlign: TextAlign.center,
                   style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                        fontWeight: FontWeight.bold,
-                      ),
+                    fontWeight: FontWeight.bold,
+                  ),
                 ),
                 const SizedBox(height: 12),
-                Text(
-                  message,
-                  textAlign: TextAlign.center,
-                ),
+                Text(message, textAlign: TextAlign.center),
                 const SizedBox(height: 24),
                 FilledButton(
                   onPressed: onRetry,
                   child: const Text('Try again'),
                 ),
-                TextButton(
-                  onPressed: onSignOut,
-                  child: const Text('Sign out'),
-                ),
+                TextButton(onPressed: onSignOut, child: const Text('Sign out')),
               ],
             ),
           ),

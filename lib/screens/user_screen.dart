@@ -11,15 +11,19 @@ class UserScreen extends StatefulWidget {
 class _UserScreenState extends State<UserScreen> {
   final SupabaseClient _supabase = Supabase.instance.client;
 
-  static const List<String> _collegeOptions = [
-    'ART',
-    'STEM',
-    'Health Science',
+  static const List<String> _teams = [
+    'Pixel Pioneers',
+    'Number Knights',
+    'Iron Minds',
+    'Pulse Pack',
+    'Velocity',
+    'Byte Force',
   ];
 
   String? _username;
   String? _email;
   String? _selectedCollege;
+  String? _selectedTeam;
 
   bool _isLoading = true;
   bool _isSaving = false;
@@ -50,24 +54,17 @@ class _UserScreenState extends State<UserScreen> {
 
       final profile = await _supabase
           .from('profiles')
-          .select('username, email, college')
+          .select('username, email')
           .eq('id', user.id)
           .single();
 
       if (!mounted) return;
 
-      final savedCollege = profile['college'] as String?;
-
       setState(() {
         _username = profile['username'] as String?;
         _email = profile['email'] as String?;
 
-        if (savedCollege != null &&
-            _collegeOptions.contains(savedCollege)) {
-          _selectedCollege = savedCollege;
-        } else {
-          _selectedCollege = null;
-        }
+        _selectedTeam = null;
 
         _isLoading = false;
       });
@@ -117,9 +114,7 @@ class _UserScreenState extends State<UserScreen> {
     try {
       await _supabase
           .from('profiles')
-          .update({
-            'college': _selectedCollege,
-          })
+          .update({'college': _selectedCollege})
           .eq('id', user.id);
 
       if (!mounted) return;
@@ -154,9 +149,7 @@ class _UserScreenState extends State<UserScreen> {
       backgroundColor: const Color(0xFFF7F4F2),
       body: SafeArea(
         child: _isLoading
-            ? const Center(
-                child: CircularProgressIndicator(),
-              )
+            ? const Center(child: CircularProgressIndicator())
             : RefreshIndicator(
                 onRefresh: _loadUserProfile,
                 child: SingleChildScrollView(
@@ -173,162 +166,109 @@ class _UserScreenState extends State<UserScreen> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        const SizedBox(height: 20),
-
-        const Center(
-          child: CircleAvatar(
-            radius: 50,
-            child: Icon(
-              Icons.person,
-              size: 60,
-            ),
-          ),
-        ),
-
         const SizedBox(height: 18),
-
+        const Center(
+          child: CircleAvatar(radius: 34, child: Icon(Icons.person, size: 38)),
+        ),
+        const SizedBox(height: 12),
         Center(
           child: Text(
             _username ?? 'No username',
-            style: const TextStyle(
-              fontSize: 28,
-              fontWeight: FontWeight.bold,
-            ),
+            style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
           ),
         ),
-
-        const SizedBox(height: 6),
-
         Center(
           child: Text(
             _email ?? '',
-            style: TextStyle(
-              fontSize: 16,
-              color: Colors.grey.shade700,
-            ),
+            style: TextStyle(color: Colors.grey.shade700),
           ),
         ),
-
-        const SizedBox(height: 28),
-
+        const SizedBox(height: 18),
         Card(
-          child: ListTile(
-            leading: const Icon(Icons.badge_outlined),
-            title: const Text('Username'),
-            subtitle: Text(
-              _username ?? 'Not available',
-            ),
+          child: Column(
+            children: [
+              ListTile(
+                leading: const Icon(Icons.local_fire_department),
+                title: const Text('Created Sparks'),
+                trailing: const Text('—'),
+              ),
+              ListTile(
+                leading: const Icon(Icons.event_available),
+                title: const Text('Joined Events'),
+                trailing: const Text('—'),
+              ),
+              ListTile(
+                leading: const Icon(Icons.people_outline),
+                title: const Text('Friends / Following'),
+                subtitle: const Text('Friends are people you follow'),
+                trailing: const Icon(Icons.chevron_right),
+                onTap: () => Navigator.of(context).push(
+                  MaterialPageRoute(builder: (_) => const _FriendsScreen()),
+                ),
+              ),
+            ],
           ),
         ),
-
-        const SizedBox(height: 12),
-
-        Card(
-          child: ListTile(
-            leading: const Icon(Icons.email_outlined),
-            title: const Text('UTRGV Email'),
-            subtitle: Text(
-              _email ?? 'Not available',
-            ),
-          ),
-        ),
-
-        const SizedBox(height: 24),
-
-        const Text(
-          'College',
-          style: TextStyle(
-            fontSize: 18,
-            fontWeight: FontWeight.bold,
-          ),
-        ),
-
-        const SizedBox(height: 10),
-
+        const SizedBox(height: 14),
+        // TODO(Bonfire): Connect team selection to profiles.team once the team field is available in the production profile schema.
         DropdownButtonFormField<String>(
-          value: _selectedCollege,
+          value: _selectedTeam,
           decoration: const InputDecoration(
-            labelText: 'Select your college',
-            prefixIcon: Icon(Icons.school_outlined),
+            labelText: 'Team',
+            prefixIcon: Icon(Icons.groups_outlined),
             border: OutlineInputBorder(),
           ),
-          items: _collegeOptions.map((college) {
-            return DropdownMenuItem<String>(
-              value: college,
-              child: Text(college),
-            );
-          }).toList(),
-          onChanged: _isSaving
-              ? null
-              : (value) {
-                  setState(() {
-                    _selectedCollege = value;
-                    _errorMessage = null;
-                    _successMessage = null;
-                  });
-                },
+          items: _teams
+              .map((team) => DropdownMenuItem(value: team, child: Text(team)))
+              .toList(),
+          onChanged: (value) => setState(() => _selectedTeam = value),
         ),
-
-        const SizedBox(height: 16),
-
-        FilledButton.icon(
-          onPressed: _isSaving ? null : _saveCollege,
-          icon: _isSaving
-              ? const SizedBox(
-                  width: 20,
-                  height: 20,
-                  child: CircularProgressIndicator(
-                    strokeWidth: 2,
-                  ),
-                )
-              : const Icon(Icons.save_outlined),
-          label: Text(
-            _isSaving ? 'Saving...' : 'Save college',
-          ),
-          style: FilledButton.styleFrom(
-            minimumSize: const Size.fromHeight(52),
-          ),
-        ),
-
-        if (_successMessage != null) ...[
-          const SizedBox(height: 16),
-          Container(
-            padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(
-              color: Colors.green.shade100,
-              borderRadius: BorderRadius.circular(10),
-            ),
-            child: Text(
-              _successMessage!,
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                color: Colors.green.shade900,
+        const SizedBox(height: 14),
+        Card(
+          child: Column(
+            children: [
+              ListTile(
+                leading: const Icon(Icons.settings_outlined),
+                title: const Text('Settings'),
+                onTap: () => Navigator.of(context).push(
+                  MaterialPageRoute(builder: (_) => const _SettingsScreen()),
+                ),
               ),
-            ),
+              ListTile(
+                leading: const Icon(Icons.logout),
+                title: const Text('Sign out'),
+                onTap: () => _supabase.auth.signOut(),
+              ),
+            ],
           ),
-        ],
-
-        if (_errorMessage != null) ...[
-          const SizedBox(height: 16),
-          Container(
+        ),
+        if (_errorMessage != null)
+          Padding(
             padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(
-              color: Theme.of(context).colorScheme.errorContainer,
-              borderRadius: BorderRadius.circular(10),
-            ),
             child: Text(
               _errorMessage!,
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                color:
-                    Theme.of(context).colorScheme.onErrorContainer,
-              ),
+              style: const TextStyle(color: Colors.red),
             ),
           ),
-        ],
-
-        const SizedBox(height: 30),
       ],
     );
   }
+}
+
+class _FriendsScreen extends StatelessWidget {
+  const _FriendsScreen();
+  @override
+  Widget build(BuildContext context) => Scaffold(
+    appBar: AppBar(title: const Text('Friends / Following')),
+    body: const Center(child: Text('Your friends will appear here.')),
+  );
+}
+
+class _SettingsScreen extends StatelessWidget {
+  const _SettingsScreen();
+  @override
+  Widget build(BuildContext context) => Scaffold(
+    appBar: AppBar(title: const Text('Settings')),
+    body: const Center(child: Text('Account settings')),
+  );
 }

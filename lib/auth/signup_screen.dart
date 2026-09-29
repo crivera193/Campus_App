@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-
 import '../utils/username_generator.dart';
 
 class SignupScreen extends StatefulWidget {
@@ -52,16 +51,15 @@ class _SignupScreenState extends State<SignupScreen> {
     try {
       final email = _emailController.text.trim().toLowerCase();
 
-      // Generate a random two-noun username and make sure
-      // it does not already exist in the profiles table.
-      final username = await UsernameGenerator.generateUnique();
+      // Preserve the provisional username metadata used by the existing
+      // profile-creation path, while marking it pending so AuthGate still
+      // requires the user's final username selection.
+      final provisionalUsername = await UsernameGenerator.generateUnique();
 
       final response = await _supabase.auth.signUp(
         email: email,
         password: _passwordController.text,
-        data: {
-          'username': username,
-        },
+        data: {'username': provisionalUsername, 'username_pending': true},
       );
 
       if (response.user == null) {
@@ -76,9 +74,7 @@ class _SignupScreenState extends State<SignupScreen> {
         //
         // Return to the root route where AuthGate can display
         // the authenticated part of the app.
-        Navigator.of(context).popUntil(
-          (route) => route.isFirst,
-        );
+        Navigator.of(context).popUntil((route) => route.isFirst);
       } else {
         await showDialog<void>(
           context: context,
@@ -86,8 +82,7 @@ class _SignupScreenState extends State<SignupScreen> {
             return AlertDialog(
               title: const Text('Check your email'),
               content: Text(
-                'Your account was created with the username '
-                '"$username". Confirm your email before signing in.',
+                'Your account was created. Confirm your email, then choose your campus username when you sign in.',
               ),
               actions: [
                 TextButton(
@@ -116,8 +111,7 @@ class _SignupScreenState extends State<SignupScreen> {
 
       setState(() {
         _errorMessage =
-            'Unable to generate a username or create the profile.\n'
-            '${error.message}';
+            'Unable to create the account profile.\n${error.message}';
       });
     } catch (error) {
       if (!mounted) return;
@@ -147,9 +141,7 @@ class _SignupScreenState extends State<SignupScreen> {
           child: SingleChildScrollView(
             padding: const EdgeInsets.all(24),
             child: ConstrainedBox(
-              constraints: const BoxConstraints(
-                maxWidth: 440,
-              ),
+              constraints: const BoxConstraints(maxWidth: 440),
               child: Card(
                 elevation: 0,
                 child: Padding(
@@ -168,10 +160,8 @@ class _SignupScreenState extends State<SignupScreen> {
 
                         Text(
                           'Student registration',
-                          style:
-                              Theme.of(context).textTheme.headlineSmall?.copyWith(
-                                    fontWeight: FontWeight.bold,
-                                  ),
+                          style: Theme.of(context).textTheme.headlineSmall
+                              ?.copyWith(fontWeight: FontWeight.bold),
                         ),
 
                         const SizedBox(height: 8),
@@ -184,7 +174,7 @@ class _SignupScreenState extends State<SignupScreen> {
                         const SizedBox(height: 8),
 
                         Text(
-                          'A random username will be assigned automatically.',
+                          'Choose your campus username after creating your account.',
                           textAlign: TextAlign.center,
                           style: Theme.of(context).textTheme.bodySmall,
                         ),
@@ -229,9 +219,7 @@ class _SignupScreenState extends State<SignupScreen> {
                           controller: _passwordController,
                           obscureText: _obscurePassword,
                           textInputAction: TextInputAction.next,
-                          autofillHints: const [
-                            AutofillHints.newPassword,
-                          ],
+                          autofillHints: const [AutofillHints.newPassword],
                           decoration: InputDecoration(
                             labelText: 'Password',
                             prefixIcon: const Icon(Icons.lock_outline),
@@ -272,9 +260,7 @@ class _SignupScreenState extends State<SignupScreen> {
                           controller: _confirmPasswordController,
                           obscureText: _obscureConfirmation,
                           textInputAction: TextInputAction.done,
-                          autofillHints: const [
-                            AutofillHints.newPassword,
-                          ],
+                          autofillHints: const [AutofillHints.newPassword],
                           onFieldSubmitted: (_) {
                             if (!_isLoading) {
                               _createAccount();
@@ -282,8 +268,7 @@ class _SignupScreenState extends State<SignupScreen> {
                           },
                           decoration: InputDecoration(
                             labelText: 'Confirm password',
-                            prefixIcon:
-                                const Icon(Icons.lock_reset_outlined),
+                            prefixIcon: const Icon(Icons.lock_reset_outlined),
                             border: const OutlineInputBorder(),
                             suffixIcon: IconButton(
                               tooltip: _obscureConfirmation
@@ -291,8 +276,7 @@ class _SignupScreenState extends State<SignupScreen> {
                                   : 'Hide password',
                               onPressed: () {
                                 setState(() {
-                                  _obscureConfirmation =
-                                      !_obscureConfirmation;
+                                  _obscureConfirmation = !_obscureConfirmation;
                                 });
                               },
                               icon: Icon(
@@ -321,17 +305,17 @@ class _SignupScreenState extends State<SignupScreen> {
                             width: double.infinity,
                             padding: const EdgeInsets.all(12),
                             decoration: BoxDecoration(
-                              color: Theme.of(context)
-                                  .colorScheme
-                                  .errorContainer,
+                              color: Theme.of(
+                                context,
+                              ).colorScheme.errorContainer,
                               borderRadius: BorderRadius.circular(10),
                             ),
                             child: Text(
                               _errorMessage!,
                               style: TextStyle(
-                                color: Theme.of(context)
-                                    .colorScheme
-                                    .onErrorContainer,
+                                color: Theme.of(
+                                  context,
+                                ).colorScheme.onErrorContainer,
                               ),
                             ),
                           ),
@@ -342,8 +326,7 @@ class _SignupScreenState extends State<SignupScreen> {
                         SizedBox(
                           width: double.infinity,
                           child: FilledButton.icon(
-                            onPressed:
-                                _isLoading ? null : _createAccount,
+                            onPressed: _isLoading ? null : _createAccount,
                             style: FilledButton.styleFrom(
                               minimumSize: const Size.fromHeight(52),
                             ),

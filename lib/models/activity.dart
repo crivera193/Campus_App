@@ -171,11 +171,18 @@ class ActivityDraft {
       errors.add('Choose a valid activity category.');
     }
 
-    if (!const {'edinburg', 'brownsville'}.contains(campus)) {
+    // Campus is the activity's campus label; coordinates themselves may be
+    // anywhere and are never matched against campus/building pins here.
+    if (!const {
+      'edinburg',
+      'brownsville',
+    }.contains(campus.trim().toLowerCase())) {
       errors.add('Choose a valid campus.');
     }
 
-    if (latitude < -90 ||
+    if (!latitude.isFinite ||
+        !longitude.isFinite ||
+        latitude < -90 ||
         latitude > 90 ||
         longitude < -180 ||
         longitude > 180) {
@@ -211,7 +218,7 @@ class ActivityDraft {
       'title': title.trim(),
       'description': description,
       'category': categoryId,
-      'campus': campus,
+      'campus': campus.trim().toLowerCase(),
       'latitude': latitude,
       'longitude': longitude,
       'starts_at': startsAt.toUtc().toIso8601String(),
