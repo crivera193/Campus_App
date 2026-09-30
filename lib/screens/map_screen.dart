@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math' as math;
 import 'dart:ui' as ui;
 
 import 'package:campus_app/data/campus_locations.dart';
@@ -20,7 +21,10 @@ class MapScreen extends StatefulWidget {
     this.refreshRequest = 0,
   });
 
-  static const double nearbyActivityMarkerOffset = 0.00008;
+  // Marker clustering/spread is visual-only. Stored coordinates are never
+  // modified.
+  static const double _expandedSpreadDegrees = 0.00008;
+  static const double _clusterRadiusMeters = 6.0;
   final Activity? selectedActivity;
   final int focusRequest;
   final int refreshRequest;
@@ -60,46 +64,8 @@ class MapScreen extends StatefulWidget {
     return groupedActivities;
   }
 
-  static Position computeActivityMarkerPosition(
-    Activity activity,
-    int index,
-    List<Activity> activities,
-  ) {
-    if (activities.length < 2) {
-      return Position(activity.longitude, activity.latitude);
-    }
-
-    final nearbyActivities = activities.where((candidate) {
-      if (candidate.id == activity.id) {
-        return false;
-      }
-
-      final longitudeDistance = (candidate.longitude - activity.longitude)
-          .abs();
-      final latitudeDistance = (candidate.latitude - activity.latitude).abs();
-
-      return longitudeDistance < nearbyActivityMarkerOffset * 2 &&
-          latitudeDistance < nearbyActivityMarkerOffset * 2;
-    }).toList();
-
-    if (nearbyActivities.isEmpty) {
-      return Position(activity.longitude, activity.latitude);
-    }
-
-    final sortedNearby = [...nearbyActivities, activity]
-      ..sort((left, right) => left.id.compareTo(right.id));
-
-    final clusterIndex = sortedNearby.indexWhere(
-      (candidate) => candidate.id == activity.id,
-    );
-
-    final xOffset =
-        ((clusterIndex % 2) == 0 ? 1 : -1) * nearbyActivityMarkerOffset;
-
-    final yOffset =
-        (((clusterIndex ~/ 2) % 2) == 0 ? 1 : -1) * nearbyActivityMarkerOffset;
-
-    return Position(activity.longitude + xOffset, activity.latitude + yOffset);
+  static Position trueActivityMarkerPosition(Activity activity) {
+    return Position(activity.longitude, activity.latitude);
   }
 
   @override
@@ -235,6 +201,8 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
   final Map<String, LocationData> _locationAnnotationDataMap = {};
 
   final Map<String, Activity> _activityAnnotationDataMap = {};
+  final Map<String, String> _clusterAnnotationDataMap = {};
+  final Map<String, _ActivityCluster> _clustersById = {};
 
   final Map<String, List<Activity>> _permanentMarkerActivitiesMap = {};
   //saves the time needed to load images from assets
@@ -251,6 +219,7 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
 
   int _activityRefreshRequest = 0;
   String? _temporarilyVisibleActivityId;
+  String? _expandedClusterId;
 
   bool _isRequestingLocation = false;
   bool _showingUserLocation = false;
@@ -312,10 +281,14 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
     if (widget.focusRequest != oldWidget.focusRequest &&
         widget.selectedActivity != null) {
       _temporarilyVisibleActivityId = widget.selectedActivity!.id;
+      // If the selected activity is in an overlap cluster, expand it so the
+      // marker is visible/selectable for the same ~10s window.
+      _expandedClusterId = null;
       _selectedActivityVisibilityTimer?.cancel();
       _selectedActivityVisibilityTimer = Timer(const Duration(seconds: 10), () {
         if (!mounted) return;
         _temporarilyVisibleActivityId = null;
+        _expandedClusterId = null;
         unawaited(_refreshActivities());
       });
       unawaited(_refreshActivities());
@@ -591,9 +564,23 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
     _activityAnnotationManager!.tapEvents(
       onTap: (annotation) {
         final activity = _activityAnnotationDataMap[annotation.id];
-
         if (activity != null) {
-          showActivityDetailsSheet(context, activity);
+          showActivityDetailsSheet(
+            context,
+            activity,
+            onActivityChanged: () => unawaited(_refreshActivities()),
+          );
+          return;
+        }
+
+        final clusterId = _clusterAnnotationDataMap[annotation.id];
+        if (clusterId != null) {
+          setState(() {
+            _expandedClusterId = _expandedClusterId == clusterId
+                ? null
+                : clusterId;
+          });
+          unawaited(_refreshActivities());
         }
       },
     );
@@ -665,25 +652,66 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
       await activityManager.deleteAll();
 
       _activityAnnotationDataMap.clear();
+      _clusterAnnotationDataMap.clear();
+      _clustersById.clear();
+
+      // Build visual-only overlap clusters: activities keep their true
+      // coordinates, but when multiple activities share the same/nearly-same
+      // point we show a bundled marker that expands on tap.
+      final clusters = _buildOverlapClusters(standaloneActivities);
+      for (final cluster in clusters) {
+        _clustersById[cluster.id] = cluster;
+      }
+
+      // If the temporarily-visible activity sits in an overlap cluster, expand
+      // that cluster for the visibility window.
+      if (_temporarilyVisibleActivityId != null) {
+        for (final cluster in clusters) {
+          if (cluster.activities.any(
+            (a) => a.id == _temporarilyVisibleActivityId,
+          )) {
+            _expandedClusterId ??= cluster.id;
+            break;
+          }
+        }
+      }
+
+      final renderItems = <_RenderItem>[];
+      for (final cluster in clusters) {
+        if (cluster.activities.length == 1) {
+          renderItems.add(_RenderItem.activity(cluster.activities.first));
+          continue;
+        }
+
+        if (_expandedClusterId == cluster.id) {
+          final expandedPositions = _expandedPositionsFor(
+            cluster.activities.length,
+          );
+          for (var i = 0; i < cluster.activities.length; i++) {
+            renderItems.add(
+              _RenderItem.activity(
+                cluster.activities[i],
+                overridePosition: Position(
+                  cluster.anchor.longitude + expandedPositions[i].lng,
+                  cluster.anchor.latitude + expandedPositions[i].lat,
+                ),
+              ),
+            );
+          }
+        } else {
+          renderItems.add(_RenderItem.cluster(cluster));
+        }
+      }
 
       final annotations = await activityManager.createMulti(
-        standaloneActivities.asMap().entries.map((entry) {
-          final index = entry.key;
-          final activity = entry.value;
-
-          final markerPosition = MapScreen.computeActivityMarkerPosition(
-            activity,
-            index,
-            standaloneActivities,
-          );
-
+        renderItems.map((item) {
           return CircleAnnotationOptions(
-            geometry: Point(coordinates: markerPosition),
-            circleColor: activity.category.color.toARGB32(),
-            circleRadius: 11,
-            circleStrokeColor: Colors.white.toARGB32(),
-            circleStrokeWidth: 2,
-            circleSortKey: 1,
+            geometry: Point(coordinates: item.position),
+            circleColor: item.color.toARGB32(),
+            circleRadius: item.radius,
+            circleStrokeColor: item.strokeColor.toARGB32(),
+            circleStrokeWidth: item.strokeWidth,
+            circleSortKey: item.sortKey,
           );
         }).toList(),
       );
@@ -692,8 +720,12 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
         final annotationId = annotations[index]?.id;
 
         if (annotationId != null) {
-          _activityAnnotationDataMap[annotationId] =
-              standaloneActivities[index];
+          final item = renderItems[index];
+          if (item.activity != null) {
+            _activityAnnotationDataMap[annotationId] = item.activity!;
+          } else if (item.clusterId != null) {
+            _clusterAnnotationDataMap[annotationId] = item.clusterId!;
+          }
         }
       }
     } catch (error) {
@@ -742,7 +774,11 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
         return;
       }
 
-      showActivityDetailsSheet(context, activity);
+      showActivityDetailsSheet(
+        context,
+        activity,
+        onActivityChanged: () => unawaited(_refreshActivities()),
+      );
     });
   }
 
@@ -833,7 +869,12 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
                         trailing: const Icon(Icons.chevron_right),
                         onTap: () {
                           Navigator.of(context).pop();
-                          showActivityDetailsSheet(context, activity);
+                          showActivityDetailsSheet(
+                            context,
+                            activity,
+                            onActivityChanged: () =>
+                                unawaited(_refreshActivities()),
+                          );
                         },
                       ),
                     ),
@@ -1017,6 +1058,11 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
             viewport: _viewport,
             onMapCreated: _onMapCreated,
             onStyleLoadedListener: _onStyleLoaded,
+            onTapListener: (context) {
+              if (_expandedClusterId == null) return;
+              setState(() => _expandedClusterId = null);
+              unawaited(_refreshActivities());
+            },
           ),
           SafeArea(
             child: Align(
@@ -1153,3 +1199,166 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
     );
   }
 }
+
+class _ActivityCluster {
+  _ActivityCluster({
+    required this.id,
+    required this.anchor,
+    required List<Activity> activities,
+  }) : activities = List<Activity>.unmodifiable(activities);
+
+  final String id;
+  final _ClusterAnchor anchor;
+  final List<Activity> activities;
+}
+
+class _ClusterAnchor {
+  const _ClusterAnchor({required this.latitude, required this.longitude});
+
+  final double latitude;
+  final double longitude;
+}
+
+class _RenderItem {
+  _RenderItem._({
+    required this.position,
+    required this.color,
+    required this.radius,
+    required this.strokeColor,
+    required this.strokeWidth,
+    required this.sortKey,
+    this.activity,
+    this.clusterId,
+  });
+
+  factory _RenderItem.activity(
+    Activity activity, {
+    Position? overridePosition,
+  }) {
+    return _RenderItem._(
+      activity: activity,
+      position:
+          overridePosition ?? MapScreen.trueActivityMarkerPosition(activity),
+      color: activity.category.color,
+      radius: 11,
+      strokeColor: Colors.white,
+      strokeWidth: 2,
+      sortKey: 2,
+    );
+  }
+
+  factory _RenderItem.cluster(_ActivityCluster cluster) {
+    final first = cluster.activities.first;
+    return _RenderItem._(
+      clusterId: cluster.id,
+      position: Position(cluster.anchor.longitude, cluster.anchor.latitude),
+      color: first.category.color.withValues(alpha: 0.9),
+      radius: 14,
+      strokeColor: Colors.black.withValues(alpha: 0.35),
+      strokeWidth: 3,
+      sortKey: 1,
+    );
+  }
+
+  final Position position;
+  final Color color;
+  final double radius;
+  final Color strokeColor;
+  final double strokeWidth;
+  final double sortKey;
+  final Activity? activity;
+  final String? clusterId;
+}
+
+List<_ActivityCluster> _buildOverlapClusters(List<Activity> activities) {
+  // Deterministic ordering keeps cluster IDs stable across refreshes.
+  final sorted = [...activities]
+    ..sort((a, b) {
+      final lat = a.latitude.compareTo(b.latitude);
+      if (lat != 0) return lat;
+      final lng = a.longitude.compareTo(b.longitude);
+      if (lng != 0) return lng;
+      return a.id.compareTo(b.id);
+    });
+
+  final clusters = <_ActivityCluster>[];
+  final mutable = <String, List<Activity>>{};
+  final anchors = <String, _ClusterAnchor>{};
+
+  for (final activity in sorted) {
+    String? chosenClusterId;
+    for (final entry in anchors.entries) {
+      final anchor = entry.value;
+      final distance = _distanceMeters(
+        activity.latitude,
+        activity.longitude,
+        anchor.latitude,
+        anchor.longitude,
+      );
+      if (distance <= MapScreen._clusterRadiusMeters) {
+        chosenClusterId = entry.key;
+        break;
+      }
+    }
+
+    if (chosenClusterId == null) {
+      final anchor = _ClusterAnchor(
+        latitude: activity.latitude,
+        longitude: activity.longitude,
+      );
+      chosenClusterId =
+          '${activity.id}:${anchor.latitude.toStringAsFixed(6)}:${anchor.longitude.toStringAsFixed(6)}';
+      anchors[chosenClusterId] = anchor;
+      mutable[chosenClusterId] = <Activity>[];
+    }
+
+    mutable[chosenClusterId]!.add(activity);
+  }
+
+  for (final entry in mutable.entries) {
+    final id = entry.key;
+    final list = entry.value..sort((a, b) => a.id.compareTo(b.id));
+    clusters.add(
+      _ActivityCluster(id: id, anchor: anchors[id]!, activities: list),
+    );
+  }
+
+  return clusters;
+}
+
+class _LatLngDelta {
+  const _LatLngDelta(this.lat, this.lng);
+  final double lat;
+  final double lng;
+}
+
+List<_LatLngDelta> _expandedPositionsFor(int count) {
+  if (count <= 1) return const <_LatLngDelta>[];
+
+  // Spread in a simple ring around the true location; visual-only.
+  final deltas = <_LatLngDelta>[];
+  final radius = MapScreen._expandedSpreadDegrees;
+
+  for (var i = 0; i < count; i++) {
+    final angle = (2 * 3.141592653589793 * i) / count;
+    final dx = radius * math.cos(angle);
+    final dy = radius * math.sin(angle);
+    deltas.add(_LatLngDelta(dy, dx));
+  }
+  return deltas;
+}
+
+double _distanceMeters(double lat1, double lon1, double lat2, double lon2) {
+  const earthRadius = 6371000.0;
+  final dLat = _radians(lat2 - lat1);
+  final dLon = _radians(lon2 - lon1);
+  final a =
+      math.sin(dLat / 2) * math.sin(dLat / 2) +
+      math.cos(_radians(lat1)) *
+          math.cos(_radians(lat2)) *
+          math.sin(dLon / 2) *
+          math.sin(dLon / 2);
+  return 2 * earthRadius * math.atan2(math.sqrt(a), math.sqrt(1 - a));
+}
+
+double _radians(double degrees) => degrees * math.pi / 180;

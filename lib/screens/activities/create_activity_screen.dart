@@ -93,11 +93,13 @@ class _CreateActivityScreenState extends State<CreateActivityScreen> {
   Future<void> _selectDateTime({required bool isStart}) async {
     final currentValue = isStart ? _startsAt : _endsAt;
 
+    final now = DateTime.now();
     final date = await showDatePicker(
       context: context,
       initialDate: currentValue,
-      firstDate: DateTime.now().subtract(const Duration(days: 1)),
-      lastDate: DateTime.now().add(const Duration(days: 30)),
+      firstDate: now.subtract(const Duration(days: 1)),
+      // Allow multi-week/month activities (no artificial 30-day cap).
+      lastDate: now.add(const Duration(days: 365 * 5)),
     );
 
     if (date == null || !mounted) return;
@@ -454,13 +456,45 @@ class _CreateActivityScreenState extends State<CreateActivityScreen> {
                 selected: {_startNow},
                 onSelectionChanged: (selection) => setState(() {
                   _startNow = selection.first;
-                  if (!_startNow && _startsAt.isBefore(DateTime.now()))
-                    _startsAt = DateTime.now().add(const Duration(minutes: 5));
-                  _endsAt = _startsAt.add(const Duration(hours: 1));
+                  final now = DateTime.now();
+                  if (_startNow) {
+                    // When "Now" is selected, the user still controls duration
+                    // by choosing an end time. We keep a moving "duration"
+                    // model (effectiveEnd = effectiveStart + (endsAt - startsAt)).
+                    _startsAt = now;
+                    _endsAt = _startsAt.add(const Duration(hours: 1));
+                  } else {
+                    if (_startsAt.isBefore(now)) {
+                      _startsAt = now.add(const Duration(minutes: 5));
+                    }
+                    if (!_endsAt.isAfter(_startsAt)) {
+                      _endsAt = _startsAt.add(const Duration(hours: 1));
+                    }
+                  }
                 }),
               ),
 
-              if (!_startNow) ...[
+              const SizedBox(height: 12),
+
+              if (_startNow) ...[
+                _DateTimeSelector(
+                  label: 'Ends',
+                  value: _formatDateTime(_endsAt),
+                  onPressed: () async {
+                    // Keep the duration model stable: the "Now" start time is
+                    // resolved at submission, but duration is derived from
+                    // (endsAt - startsAt). Refresh startsAt so long-open forms
+                    // don't produce surprising durations.
+                    setState(() {
+                      _startsAt = DateTime.now();
+                      if (!_endsAt.isAfter(_startsAt)) {
+                        _endsAt = _startsAt.add(const Duration(hours: 1));
+                      }
+                    });
+                    await _selectDateTime(isStart: false);
+                  },
+                ),
+              ] else ...[
                 const SizedBox(height: 12),
 
                 _DateTimeSelector(

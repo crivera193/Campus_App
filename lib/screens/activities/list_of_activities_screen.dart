@@ -1,8 +1,13 @@
+import 'dart:async';
+import 'dart:math';
+
 import 'package:campus_app/models/activity.dart';
 import 'package:campus_app/models/activity_category.dart';
 import 'package:campus_app/services/activity_repository.dart';
 import 'package:flutter/material.dart';
+import 'package:geolocator/geolocator.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 // Controls which activity dates appear in the filtered list.
 enum _ActivityStatusFilter { upcoming, today, tomorrow, thisWeek, past, all }
@@ -12,10 +17,12 @@ class ActivityListScreen extends StatefulWidget {
     super.key,
     required this.onViewOnMap,
     this.onMapRefreshRequested,
+    this.isAdmin = false,
   });
 
   final ValueChanged<Activity> onViewOnMap;
   final VoidCallback? onMapRefreshRequested;
+  final bool isAdmin;
 
   @override
   State<ActivityListScreen> createState() => _ActivityListScreenState();
@@ -29,6 +36,10 @@ class _ActivityListScreenState extends State<ActivityListScreen> {
   // IDs of activities with an ongoing join/leave request, for which the button
   // must be disabled to prevent concurrency issues.
   final Set<String> _busyActivityIds = <String>{};
+  final Set<String> _deletingActivityIds = <String>{};
+
+  final Set<String> _walkingEtaLoadingIds = <String>{};
+  final Map<String, String> _walkingEtaLabels = <String, String>{};
 
   // Store category IDs
   // An empty set means "all categories" are selected.
@@ -75,10 +86,16 @@ class _ActivityListScreenState extends State<ActivityListScreen> {
     String? errorMessage;
 
     try {
-      if (activity.hasJoined) {
+      final hasJoined =
+          ActivityRepository.membershipOverrideFor(activity.id) ??
+          activity.hasJoined;
+
+      if (hasJoined) {
         await _activityRepository.leaveActivity(activity.id);
+        ActivityRepository.setMembershipOverride(activity.id, false);
       } else {
         await _activityRepository.joinActivity(activity.id);
+        ActivityRepository.setMembershipOverride(activity.id, true);
       }
       widget.onMapRefreshRequested?.call();
     } on PostgrestException catch (error) {
@@ -125,30 +142,53 @@ class _ActivityListScreenState extends State<ActivityListScreen> {
 
     final busy = _busyActivityIds.contains(activity.id);
 
-    if (activity.hasJoined) {
-      return FilledButton.icon(
-        onPressed: busy ? null : () => _joinOrLeave(activity),
-        style: FilledButton.styleFrom(
-          backgroundColor: Colors.red,
-          foregroundColor: Colors.white,
-        ),
-        icon: const Icon(Icons.logout),
-        label: const Text('Leave'),
-      );
-    }
+    return ValueListenableBuilder<Map<String, bool>>(
+      valueListenable: ActivityRepository.membershipOverrides,
+      builder: (context, overrides, _) {
+        final hasJoined = overrides[activity.id] ?? activity.hasJoined;
 
-    if (activity.isFull) {
-      return const FilledButton(onPressed: null, child: Text('Full'));
-    }
+        if (hasJoined) {
+          return IconButton(
+            tooltip: 'Leave',
+            visualDensity: VisualDensity.compact,
+            onPressed: busy ? null : () => _joinOrLeave(activity),
+            iconSize: 20,
+            icon: busy
+                ? const SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Icon(Icons.logout),
+            color: Colors.red,
+          );
+        }
 
-    return FilledButton.icon(
-      onPressed: busy ? null : () => _joinOrLeave(activity),
-      style: FilledButton.styleFrom(
-        backgroundColor: Colors.blue,
-        foregroundColor: Colors.white,
-      ),
-      icon: const Icon(Icons.add),
-      label: const Text('Join'),
+        if (activity.isFull) {
+          return const IconButton(
+            tooltip: 'Full',
+            visualDensity: VisualDensity.compact,
+            onPressed: null,
+            iconSize: 20,
+            icon: Icon(Icons.person_off_outlined),
+          );
+        }
+
+        return IconButton(
+          tooltip: 'Join',
+          visualDensity: VisualDensity.compact,
+          onPressed: busy ? null : () => _joinOrLeave(activity),
+          iconSize: 20,
+          icon: busy
+              ? const SizedBox(
+                  width: 18,
+                  height: 18,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              : const Icon(Icons.add),
+          color: Colors.blue,
+        );
+      },
     );
   }
 
@@ -260,6 +300,170 @@ class _ActivityListScreenState extends State<ActivityListScreen> {
     return activity.endsAt.toLocal().isBefore(DateTime.now());
   }
 
+  bool _isActive(Activity activity) {
+    final now = DateTime.now();
+    return activity.startsAt.toLocal().isBefore(now) &&
+        activity.endsAt.toLocal().isAfter(now);
+  }
+
+  Uri _walkingDirectionsUri(Activity activity) {
+    final lat = activity.latitude;
+    final lng = activity.longitude;
+
+    // Prefer a universal URL that:
+    // - works on iOS/Android (opens Apple Maps / Google Maps when installed)
+    // - works on desktop (opens browser)
+    return Uri.parse(
+      'https://www.google.com/maps/dir/?api=1&destination=$lat,$lng&travelmode=walking',
+    );
+  }
+
+  double _distanceMeters(double lat1, double lon1, double lat2, double lon2) {
+    const earthRadius = 6371000.0;
+    final dLat = _radians(lat2 - lat1);
+    final dLon = _radians(lon2 - lon1);
+    final a =
+        (sin(dLat / 2) * sin(dLat / 2)) +
+        cos(_radians(lat1)) *
+            cos(_radians(lat2)) *
+            (sin(dLon / 2) * sin(dLon / 2));
+    return 2 * earthRadius * atan2(sqrt(a), sqrt(1 - a));
+  }
+
+  double _radians(double degrees) => degrees * pi / 180;
+
+  String _formatWalkEta(Duration duration) {
+    final minutes = duration.inMinutes;
+    if (minutes <= 1) return '1 min';
+    if (minutes < 60) return '$minutes min';
+    final hours = duration.inHours;
+    final remainder = minutes % 60;
+    if (remainder == 0) return '${hours}h';
+    return '${hours}h ${remainder}m';
+  }
+
+  Future<String?> _computeWalkEtaLabel(Activity activity) async {
+    try {
+      final serviceEnabled = await Geolocator.isLocationServiceEnabled();
+      if (!serviceEnabled) return null;
+
+      var permission = await Geolocator.checkPermission();
+      if (permission == LocationPermission.denied) {
+        permission = await Geolocator.requestPermission();
+      }
+      if (permission == LocationPermission.denied ||
+          permission == LocationPermission.deniedForever) {
+        return null;
+      }
+
+      final position = await Geolocator.getCurrentPosition(
+        desiredAccuracy: LocationAccuracy.high,
+        timeLimit: const Duration(seconds: 4),
+      );
+
+      final distance = _distanceMeters(
+        position.latitude,
+        position.longitude,
+        activity.latitude,
+        activity.longitude,
+      );
+
+      // Average walking speed ~1.4 m/s (~5 km/h).
+      final seconds = (distance / 1.4).round().clamp(1, 365 * 24 * 3600);
+      final eta = Duration(seconds: seconds);
+      return _formatWalkEta(eta);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<void> _openWalkingDirections(Activity activity) async {
+    final uri = _walkingDirectionsUri(activity);
+    await launchUrl(uri, mode: LaunchMode.externalApplication);
+  }
+
+  Future<void> _ensureWalkingEta(Activity activity) async {
+    if (_walkingEtaLabels.containsKey(activity.id) ||
+        _walkingEtaLoadingIds.contains(activity.id)) {
+      return;
+    }
+
+    setState(() => _walkingEtaLoadingIds.add(activity.id));
+    try {
+      final eta = await _computeWalkEtaLabel(activity);
+      if (!mounted) return;
+      setState(() {
+        if (eta != null) {
+          _walkingEtaLabels[activity.id] = eta;
+        }
+      });
+    } finally {
+      if (mounted) {
+        setState(() => _walkingEtaLoadingIds.remove(activity.id));
+      }
+    }
+  }
+
+  Future<void> _prefetchWalkingEtaIfPossible(Activity activity) async {
+    if (_walkingEtaLabels.containsKey(activity.id) ||
+        _walkingEtaLoadingIds.contains(activity.id)) {
+      return;
+    }
+
+    try {
+      final serviceEnabled = await Geolocator.isLocationServiceEnabled();
+      if (!serviceEnabled) return;
+      final permission = await Geolocator.checkPermission();
+      if (permission != LocationPermission.always &&
+          permission != LocationPermission.whileInUse) {
+        return;
+      }
+      await _ensureWalkingEta(activity);
+    } catch (_) {
+      // Best-effort; no UI error for prefetch.
+    }
+  }
+
+  Future<void> _confirmAdminDelete(Activity activity) async {
+    if (_deletingActivityIds.contains(activity.id)) return;
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (_) => const _DeleteActivityConfirmationDialog(),
+    );
+
+    if (confirmed != true) return;
+
+    setState(() => _deletingActivityIds.add(activity.id));
+    String? errorMessage;
+    try {
+      await _activityRepository.adminDeleteActivity(activity.id);
+      widget.onMapRefreshRequested?.call();
+      await _refreshActivities();
+    } on PostgrestException catch (error) {
+      errorMessage = error.message;
+    } on StateError catch (error) {
+      errorMessage = error.message;
+    } catch (_) {
+      errorMessage = 'Something went wrong. Please try again.';
+    } finally {
+      if (mounted) {
+        setState(() => _deletingActivityIds.remove(activity.id));
+      }
+    }
+
+    if (!mounted) return;
+    if (errorMessage != null) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(errorMessage)));
+    } else {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('${activity.title} deleted')));
+    }
+  }
+
   int _daysSinceEnded(Activity activity) {
     final now = DateTime.now();
     final ended = activity.endsAt.toLocal();
@@ -358,23 +562,22 @@ class _ActivityListScreenState extends State<ActivityListScreen> {
       final tomorrow = today.add(const Duration(days: 1));
       final nextDay = tomorrow.add(const Duration(days: 1));
       final weekEnd = today.add(Duration(days: 8 - today.weekday));
+      final start = activity.startsAt.toLocal();
+      final end = activity.endsAt.toLocal();
+      final overlapsToday = end.isAfter(today) && start.isBefore(tomorrow);
+      final overlapsTomorrow = end.isAfter(tomorrow) && start.isBefore(nextDay);
+      final overlapsThisWeek = end.isAfter(today) && start.isBefore(weekEnd);
       if (_statusFilter == _ActivityStatusFilter.past && !expired) return false;
       if (_statusFilter == _ActivityStatusFilter.upcoming && expired)
         return false;
       if (_statusFilter == _ActivityStatusFilter.today &&
-          (expired ||
-              activity.startsAt.isBefore(today) ||
-              !activity.startsAt.isBefore(tomorrow)))
+          (expired || !overlapsToday))
         return false;
       if (_statusFilter == _ActivityStatusFilter.tomorrow &&
-          (expired ||
-              activity.startsAt.isBefore(tomorrow) ||
-              !activity.startsAt.isBefore(nextDay)))
+          (expired || !overlapsTomorrow))
         return false;
       if (_statusFilter == _ActivityStatusFilter.thisWeek &&
-          (expired ||
-              activity.startsAt.isBefore(today) ||
-              !activity.startsAt.isBefore(weekEnd)))
+          (expired || !overlapsThisWeek))
         return false;
 
       return true;
@@ -731,6 +934,13 @@ class _ActivityListScreenState extends State<ActivityListScreen> {
 
   Widget _buildActivityCard(Activity activity) {
     final expired = _isExpired(activity);
+    final active = _isActive(activity);
+
+    if (!expired) {
+      // Best-effort: show a walk ETA label when location permission is already
+      // granted, without prompting.
+      unawaited(_prefetchWalkingEtaIfPossible(activity));
+    }
     // Join / Leave / Full button, or null when none should be shown.
     final joinButton = _buildJoinButton(activity);
 
@@ -792,6 +1002,17 @@ class _ActivityListScreenState extends State<ActivityListScreen> {
 
                         style: TextStyle(color: textColor),
                       ),
+
+                      if (activity.creatorUsername != null &&
+                          activity.creatorUsername!.trim().isNotEmpty) ...[
+                        const SizedBox(height: 2),
+                        Text(
+                          'by ${activity.creatorUsername}',
+                          style: TextStyle(
+                            color: textColor.withValues(alpha: 0.8),
+                          ),
+                        ),
+                      ],
 
                       if (expired) ...[
                         const SizedBox(height: 6),
@@ -916,17 +1137,62 @@ class _ActivityListScreenState extends State<ActivityListScreen> {
                   spacing: 8,
                   runSpacing: 8,
                   children: [
-                    // Join, Leave or Full. Hidden on your own activities.
+                    // 1) Join (icon only). Uses existing join/leave logic.
                     if (joinButton != null) joinButton,
-                    FilledButton.icon(
-                      onPressed: () {
-                        widget.onViewOnMap(activity);
+
+                    // 2) Walk (icon + ETA text only, no "Walk" label)
+                    TextButton.icon(
+                      onPressed: () async {
+                        await _ensureWalkingEta(activity);
+                        if (!mounted) return;
+                        await _openWalkingDirections(activity);
                       },
-
-                      icon: const Icon(Icons.map_outlined),
-
-                      label: const Text('View on map'),
+                      style: TextButton.styleFrom(
+                        visualDensity: VisualDensity.compact,
+                        padding: const EdgeInsets.symmetric(horizontal: 8),
+                      ),
+                      icon: _walkingEtaLoadingIds.contains(activity.id)
+                          ? const SizedBox(
+                              width: 18,
+                              height: 18,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            )
+                          : const Icon(Icons.directions_walk, size: 20),
+                      label: Text(
+                        _walkingEtaLabels[activity.id] ?? '',
+                        style: const TextStyle(fontWeight: FontWeight.w600),
+                      ),
                     ),
+
+                    // 3) View on Map (icon only)
+                    IconButton(
+                      tooltip: 'View on map',
+                      visualDensity: VisualDensity.compact,
+                      iconSize: 20,
+                      onPressed: () => widget.onViewOnMap(activity),
+                      icon: const Icon(Icons.map_outlined),
+                    ),
+
+                    // Join, Leave or Full. Hidden on your own activities.
+                    if (active && (widget.isAdmin || activity.isOwner))
+                      IconButton(
+                        tooltip: 'Delete activity',
+                        visualDensity: VisualDensity.compact,
+                        iconSize: 20,
+                        onPressed: _deletingActivityIds.contains(activity.id)
+                            ? null
+                            : () => _confirmAdminDelete(activity),
+                        icon: _deletingActivityIds.contains(activity.id)
+                            ? const SizedBox(
+                                width: 18,
+                                height: 18,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                ),
+                              )
+                            : const Icon(Icons.delete_outline),
+                        color: Colors.red,
+                      ),
                   ],
                 ),
               ),
@@ -938,3 +1204,66 @@ class _ActivityListScreenState extends State<ActivityListScreen> {
   }
 }
 //Hi chat -Y
+
+class _DeleteActivityConfirmationDialog extends StatefulWidget {
+  const _DeleteActivityConfirmationDialog();
+
+  @override
+  State<_DeleteActivityConfirmationDialog> createState() =>
+      _DeleteActivityConfirmationDialogState();
+}
+
+class _DeleteActivityConfirmationDialogState
+    extends State<_DeleteActivityConfirmationDialog> {
+  final TextEditingController _controller = TextEditingController();
+
+  bool get _confirmEnabled => _controller.text == 'YES';
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('Delete activity'),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          const Text('This will permanently delete this activity.'),
+          const SizedBox(height: 12),
+          const Text('Type YES to confirm.'),
+          const SizedBox(height: 8),
+          TextField(
+            controller: _controller,
+            autofocus: true,
+            onChanged: (_) => setState(() {}),
+            decoration: const InputDecoration(
+              border: OutlineInputBorder(),
+              hintText: 'YES',
+            ),
+          ),
+        ],
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(false),
+          child: const Text('Cancel'),
+        ),
+        FilledButton(
+          onPressed: _confirmEnabled
+              ? () => Navigator.of(context).pop(true)
+              : null,
+          style: FilledButton.styleFrom(
+            backgroundColor: Colors.red,
+            foregroundColor: Colors.white,
+          ),
+          child: const Text('Delete'),
+        ),
+      ],
+    );
+  }
+}

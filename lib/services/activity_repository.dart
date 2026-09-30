@@ -1,4 +1,5 @@
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:flutter/foundation.dart';
 
 import '../models/activity.dart';
 
@@ -8,6 +9,58 @@ class ActivityRepository {
     : _supabase = supabaseClient ?? Supabase.instance.client;
 
   final SupabaseClient _supabase;
+
+  /// In-memory membership state overrides so multiple UI surfaces can stay in
+  /// sync immediately after a join/leave.
+  ///
+  /// The backend remains the source of truth; lists still refresh from Supabase.
+  static final ValueNotifier<Map<String, bool>> membershipOverrides =
+      ValueNotifier(<String, bool>{});
+
+  static bool? membershipOverrideFor(String activityId) {
+    return membershipOverrides.value[activityId];
+  }
+
+  static void setMembershipOverride(String activityId, bool hasJoined) {
+    final next = Map<String, bool>.from(membershipOverrides.value);
+    next[activityId] = hasJoined;
+    membershipOverrides.value = next;
+  }
+
+  Future<Map<String, String?>> _fetchProfileUsernames(
+    Set<String> profileIds,
+  ) async {
+    if (profileIds.isEmpty) return const <String, String?>{};
+
+    try {
+      final rows = await _supabase
+          .from('profiles')
+          .select('id, username')
+          .inFilter('id', profileIds.toList());
+
+      final result = <String, String?>{};
+      for (final row in (rows as List<dynamic>)) {
+        final map = row as Map<String, dynamic>;
+        result[map['id'] as String] = map['username'] as String?;
+      }
+      return result;
+    } catch (_) {
+      // If profile RLS blocks this read, gracefully fall back to no usernames.
+      return const <String, String?>{};
+    }
+  }
+
+  Future<List<Activity>> _attachCreatorUsernames(
+    List<Activity> activities,
+  ) async {
+    final creatorIds = activities.map((a) => a.creatorId).toSet();
+    final usernames = await _fetchProfileUsernames(creatorIds);
+
+    return [
+      for (final activity in activities)
+        activity.copyWith(creatorUsername: usernames[activity.creatorId]),
+    ];
+  }
 
   /// Returns approved activities that are currently active
   /// on the selected campus.
@@ -30,9 +83,11 @@ class ActivityRepository {
         .gt('ends_at', activeAt)
         .order('starts_at');
 
-    return (rows as List<dynamic>)
+    final activities = (rows as List<dynamic>)
         .map((row) => Activity.fromMap(row as Map<String, dynamic>))
         .toList();
+
+    return _attachCreatorUsernames(activities);
   }
 
   /// Returns participant usernames for an activity visible in the recent
@@ -75,9 +130,11 @@ class ActivityRepository {
         .gte('ends_at', threeDaysAgoUtc.toIso8601String())
         .order('ends_at', ascending: false);
 
-    return (rows as List<dynamic>)
+    final activities = (rows as List<dynamic>)
         .map((row) => Activity.fromMap(row as Map<String, dynamic>))
         .toList();
+
+    return _attachCreatorUsernames(activities);
   }
 
   /// Returns all pending event submissions for the
@@ -89,9 +146,11 @@ class ActivityRepository {
         .eq('ticket_status', 'Pending')
         .order('created_at');
 
-    return (rows as List<dynamic>)
+    final activities = (rows as List<dynamic>)
         .map((row) => Activity.fromMap(row as Map<String, dynamic>))
         .toList();
+
+    return _attachCreatorUsernames(activities);
   }
 
   /// Returns the currently authenticated user's
@@ -182,5 +241,33 @@ class ActivityRepository {
         .from('activities')
         .update({'ticket_status': 'Rejected'})
         .eq('id', activityId);
+  }
+
+  /// Deletes an activity as an administrator.
+  ///
+  /// This must be backed by a secured Supabase RPC that verifies the caller is
+  /// an admin. The client cannot rely on UI-only checks.
+  Future<void> adminDeleteActivity(String activityId) async {
+    if (_supabase.auth.currentUser == null) {
+      throw StateError('You must be signed in to delete an activity.');
+    }
+
+    await _supabase.rpc(
+      'bonfire_admin_delete_activity',
+      params: {'p_activity_id': activityId},
+    );
+  }
+
+  /// Permanently deletes the currently signed-in user's account and user-owned
+  /// data.
+  ///
+  /// This must be backed by a secured Supabase RPC that deletes both the user's
+  /// profile data and auth account.
+  Future<void> deleteMyAccount() async {
+    if (_supabase.auth.currentUser == null) {
+      throw StateError('You must be signed in to delete your account.');
+    }
+
+    await _supabase.rpc('bonfire_delete_my_account');
   }
 }

@@ -38,6 +38,8 @@ dependencies:
   mapbox_maps_flutter: 2.26.0
   permission_handler: ^13.0.0
   flutter_riverpod: ^3.4.3
+  geolocator: ^14.0.2
+  url_launcher: ^6.3.1
 
 dev_dependencies:
   flutter_test:
@@ -77,6 +79,9 @@ flutter:
       - assets/litMarkerPlus.png
       - assets/Bon the friendly marshmallow.png
       - assets/UTRGV_Edinburg_mapskin.png
+      - assets/login_wallpaper.png
+      - assets/sparky.png
+      - assets/Bonfire wood text.png
   #   - images/a_dot_ham.jpeg
 
   # An image asset can refer to one or more resolution-specific "variants", see

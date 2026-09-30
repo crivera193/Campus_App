@@ -177,6 +177,7 @@ class _AdminDashboardState extends ConsumerState<AdminDashboard> {
           ActivityListScreen(
             onViewOnMap: _showActivityOnMap,
             onMapRefreshRequested: _refreshMapActivities,
+            isAdmin: true,
           ),
 
           // Index 2
@@ -466,9 +467,13 @@ class _TicketCard extends StatelessWidget {
             _TicketDetail(
               icon: Icons.person_outline,
 
-              label: 'Creator ID',
+              label: 'Creator',
 
-              value: ticket.creatorId,
+              value:
+                  (ticket.creatorUsername != null &&
+                      ticket.creatorUsername!.trim().isNotEmpty)
+                  ? ticket.creatorUsername!
+                  : ticket.creatorId,
             ),
 
             const SizedBox(height: 8),

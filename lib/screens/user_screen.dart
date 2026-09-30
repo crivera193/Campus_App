@@ -27,6 +27,7 @@ class _UserScreenState extends State<UserScreen> {
 
   bool _isLoading = true;
   bool _isSaving = false;
+  bool _isDeletingAccount = false;
 
   String? _errorMessage;
   String? _successMessage;
@@ -239,6 +240,17 @@ class _UserScreenState extends State<UserScreen> {
                 title: const Text('Sign out'),
                 onTap: () => _supabase.auth.signOut(),
               ),
+              ListTile(
+                leading: const Icon(Icons.delete_outline, color: Colors.red),
+                title: const Text(
+                  'Delete account',
+                  style: TextStyle(color: Colors.red),
+                ),
+                subtitle: const Text(
+                  'Permanently delete your account and data',
+                ),
+                onTap: _isDeletingAccount ? null : _confirmAccountDeletion,
+              ),
             ],
           ),
         ),
@@ -250,6 +262,107 @@ class _UserScreenState extends State<UserScreen> {
               style: const TextStyle(color: Colors.red),
             ),
           ),
+      ],
+    );
+  }
+
+  Future<void> _confirmAccountDeletion() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (_) => const _DeleteAccountConfirmationDialog(),
+    );
+
+    if (confirmed != true) return;
+
+    setState(() {
+      _isDeletingAccount = true;
+      _errorMessage = null;
+      _successMessage = null;
+    });
+
+    try {
+      await _supabase.rpc('bonfire_delete_my_account');
+      await _supabase.auth.signOut();
+    } on PostgrestException catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _errorMessage = error.message;
+      });
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _errorMessage = error.toString();
+      });
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isDeletingAccount = false;
+        });
+      }
+    }
+  }
+}
+
+class _DeleteAccountConfirmationDialog extends StatefulWidget {
+  const _DeleteAccountConfirmationDialog();
+
+  @override
+  State<_DeleteAccountConfirmationDialog> createState() =>
+      _DeleteAccountConfirmationDialogState();
+}
+
+class _DeleteAccountConfirmationDialogState
+    extends State<_DeleteAccountConfirmationDialog> {
+  final TextEditingController _controller = TextEditingController();
+
+  bool get _confirmEnabled => _controller.text == 'LET IT BURN';
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('Delete account'),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          const Text(
+            'This is permanent. Your Bonfire account and associated data will be deleted.',
+          ),
+          const SizedBox(height: 12),
+          const Text('Type LET IT BURN to confirm.'),
+          const SizedBox(height: 8),
+          TextField(
+            controller: _controller,
+            autofocus: true,
+            onChanged: (_) => setState(() {}),
+            decoration: const InputDecoration(
+              border: OutlineInputBorder(),
+              hintText: 'LET IT BURN',
+            ),
+          ),
+        ],
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(false),
+          child: const Text('Cancel'),
+        ),
+        FilledButton(
+          onPressed: _confirmEnabled
+              ? () => Navigator.of(context).pop(true)
+              : null,
+          style: FilledButton.styleFrom(
+            backgroundColor: Colors.red,
+            foregroundColor: Colors.white,
+          ),
+          child: const Text('Delete permanently'),
+        ),
       ],
     );
   }
