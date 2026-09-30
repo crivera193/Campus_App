@@ -20,8 +20,7 @@ class SparkAuthShell extends StatelessWidget {
   final VoidCallback? onBack;
 
   static const String wallpaperAsset = 'assets/login_wallpaper.png';
-  static const String sparkyAsset = 'assets/sparky.png';
-  static const String bonfireLogoAsset = 'assets/Bonfire wood text.png';
+  static const String combinedBrandAsset = 'assets/sparky and bonfire logo.png';
 
   @override
   Widget build(BuildContext context) {
@@ -32,12 +31,6 @@ class SparkAuthShell extends StatelessWidget {
         child: SafeArea(
           child: Stack(
             children: [
-              if (showBackButton)
-                Positioned(
-                  left: 8,
-                  top: 6,
-                  child: _BackPillButton(onPressed: onBack),
-                ),
               Align(
                 alignment: Alignment.topCenter,
                 child: SingleChildScrollView(
@@ -48,7 +41,9 @@ class SparkAuthShell extends StatelessWidget {
                       mainAxisSize: MainAxisSize.min,
                       children: [
                         const _SparkHeader(),
-                        const SizedBox(height: 18),
+                        // Push the auth controls further into the lower portion
+                        // of the screen without changing Sparky's position.
+                        const SizedBox(height: 60),
                         panel,
                         if (footer != null) ...[
                           const SizedBox(height: 14),
@@ -59,6 +54,13 @@ class SparkAuthShell extends StatelessWidget {
                   ),
                 ),
               ),
+              // Keep the back pill on top of the scroll view so it stays tappable.
+              if (showBackButton)
+                Positioned(
+                  left: 8,
+                  top: 6,
+                  child: _BackPillButton(onPressed: onBack),
+                ),
             ],
           ),
         ),
@@ -94,7 +96,8 @@ class SparkAuthBackground extends StatelessWidget {
             gradient: LinearGradient(
               begin: Alignment.topCenter,
               end: Alignment.bottomCenter,
-              colors: [Color(0x70020A16), Color(0x52020A16), Color(0x70020A16)],
+              // Slightly brighter than before while keeping readability support.
+              colors: [Color(0x5A020A16), Color(0x3F020A16), Color(0x5A020A16)],
               stops: [0.0, 0.55, 1.0],
             ),
           ),
@@ -306,69 +309,63 @@ class _SparkHeader extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final shortestSide = MediaQuery.sizeOf(context).shortestSide;
-    final sparkySize = (shortestSide * 0.36).clamp(150.0, 220.0);
-    final logoWidth = (shortestSide * 0.72).clamp(260.0, 420.0);
-    final stackHeight = (sparkySize * 0.78).clamp(150.0, 220.0);
+    final brandWidth = (shortestSide * 0.86).clamp(280.0, 460.0);
+    final brandHeight = (shortestSide * 0.52).clamp(190.0, 280.0);
 
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
         Padding(
-          padding: const EdgeInsets.only(top: 8, bottom: 8),
+          // Push the combined brand mark slightly lower while keeping the
+          // overall layout scroll-friendly on small screens.
+          padding: const EdgeInsets.only(top: 38, bottom: 8),
           child: SizedBox(
-            height: stackHeight,
+            width: brandWidth,
+            height: brandHeight,
             child: Stack(
-              clipBehavior: Clip.none,
-              alignment: Alignment.bottomCenter,
+              alignment: Alignment.center,
               children: [
-                // Warm glow behind the brand lockup.
-                Positioned(
-                  bottom: 0,
-                  child: ImageFiltered(
-                    imageFilter: ImageFilter.blur(sigmaX: 26, sigmaY: 26),
-                    child: Container(
-                      width: logoWidth * 0.9,
-                      height: stackHeight * 0.9,
-                      decoration: const BoxDecoration(
-                        gradient: RadialGradient(
-                          colors: [Color(0x44FF8A3D), Color(0x00FF8A3D)],
-                        ),
+                // Warm glow behind the combined brand mark.
+                ImageFiltered(
+                  imageFilter: ImageFilter.blur(sigmaX: 26, sigmaY: 26),
+                  child: Container(
+                    width: brandWidth * 0.92,
+                    height: brandHeight * 0.92,
+                    decoration: const BoxDecoration(
+                      gradient: RadialGradient(
+                        colors: [Color(0x44FF8A3D), Color(0x00FF8A3D)],
                       ),
                     ),
                   ),
                 ),
-                // Sparky sits behind the wooden Bonfire logo.
-                Positioned(
-                  bottom: -10,
-                  child: Image.asset(
-                    SparkAuthShell.sparkyAsset,
-                    width: sparkySize,
-                    height: sparkySize,
-                    fit: BoxFit.contain,
-                    filterQuality: FilterQuality.high,
-                  ),
-                ),
-                // Wooden Bonfire logo overlays Sparky, hiding most of his body.
-                Positioned(
-                  bottom: 0,
-                  child: Image.asset(
-                    SparkAuthShell.bonfireLogoAsset,
-                    width: logoWidth,
-                    fit: BoxFit.contain,
-                    filterQuality: FilterQuality.high,
-                  ),
+                // Combined image (Sparky + Bonfire logo) provided by design.
+                // Keep aspect ratio, no cropping, no distortion.
+                Image.asset(
+                  SparkAuthShell.combinedBrandAsset,
+                  width: brandWidth,
+                  height: brandHeight,
+                  fit: BoxFit.contain,
+                  filterQuality: FilterQuality.high,
                 ),
               ],
             ),
           ),
         ),
+        // Extra breathing room so Sparky + wallpaper dominate the top portion,
+        // and the logo/tagline read clearly below.
+        const SizedBox(height: 16),
         const Text(
-          'Start a spark. Meet your people.',
+          'Start a spark. Let the adventure begin.',
           textAlign: TextAlign.center,
           style: TextStyle(
-            color: Color(0xE6FFFFFF),
+            color: Color(0xFFFF9A3D),
+            fontWeight: FontWeight.w800,
             fontSize: 15,
             height: 1.25,
+            shadows: [
+              Shadow(color: Color(0x66000000), blurRadius: 14),
+              Shadow(color: Color(0x66FFB56A), blurRadius: 10),
+            ],
           ),
         ),
       ],
