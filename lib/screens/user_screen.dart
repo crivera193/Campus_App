@@ -1,6 +1,25 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+// --- Styling ---
+class _ProfilePalette {
+  static const background = Color(0xFFF3F7FF); // light blue-gray
+  static const surface = Color(0xFFFFFFFF); // cards
+  static const surfaceAlt = Color(0xFFEAF2FF); // subtle blue surface
+  static const border = Color(0xFFD7E4F5);
+  static const text = Color(0xFF0F1E3A); // navy/charcoal
+  static const textMuted = Color(0xFF4B5E7A);
+  static const iconMuted = Color(0xFF466587);
+
+  static const primaryBlue = Color(0xFF2F6FEB);
+  static const primaryBlueSoft = Color(0xFF6FA8FF);
+  static const purpleAccent = Color(0xFF6B4EFF);
+  static const tealAccent = Color(0xFF1BA6A6);
+  static const bonfireOrange = Color(0xFFFF9A3D);
+
+  static const danger = Color(0xFFC44A3D);
+}
+
 class UserScreen extends StatefulWidget {
   const UserScreen({super.key});
 
@@ -150,21 +169,26 @@ class _UserScreenState extends State<UserScreen> {
       inputDecorationTheme: _profileInputTheme(),
       textTheme: Theme.of(
         context,
-      ).textTheme.apply(bodyColor: Colors.white, displayColor: Colors.white),
+      ).textTheme.apply(
+            bodyColor: _ProfilePalette.text,
+            displayColor: _ProfilePalette.text,
+          ),
     );
 
     return Theme(
       data: themed,
       child: Scaffold(
-        backgroundColor: const Color(0xFF0B1020),
+        backgroundColor: _ProfilePalette.background,
         body: SafeArea(
           child: _isLoading
               ? const Center(
-                  child: CircularProgressIndicator(color: Color(0xFFFF9A3D)),
+                  child: CircularProgressIndicator(
+                    color: _ProfilePalette.primaryBlue,
+                  ),
                 )
               : RefreshIndicator(
-                  color: const Color(0xFFFF9A3D),
-                  backgroundColor: const Color(0xFF1A1B3A),
+                  color: _ProfilePalette.primaryBlue,
+                  backgroundColor: _ProfilePalette.surface,
                   onRefresh: _loadUserProfile,
                   child: SingleChildScrollView(
                     physics: const AlwaysScrollableScrollPhysics(),
@@ -187,18 +211,21 @@ class _UserScreenState extends State<UserScreen> {
         ),
         const SizedBox(height: 14),
         _BonfireSurface(
+          borderTint: _ProfilePalette.primaryBlue,
           child: Column(
             children: [
               _BonfireRow(
                 icon: Icons.local_fire_department,
                 title: 'Created Sparks',
                 trailingText: '—',
+                iconColor: _ProfilePalette.bonfireOrange,
               ),
               const _BonfireDivider(),
               _BonfireRow(
                 icon: Icons.event_available,
                 title: 'Joined Events',
                 trailingText: '—',
+                iconColor: _ProfilePalette.purpleAccent,
               ),
               const _BonfireDivider(),
               _BonfireRow(
@@ -206,6 +233,7 @@ class _UserScreenState extends State<UserScreen> {
                 title: 'Friends / Following',
                 subtitle: 'Friends are people you follow',
                 trailingIcon: Icons.chevron_right_rounded,
+                iconColor: _ProfilePalette.tealAccent,
                 onTap: () => Navigator.of(context).push(
                   MaterialPageRoute(builder: (_) => const _FriendsScreen()),
                 ),
@@ -228,12 +256,14 @@ class _UserScreenState extends State<UserScreen> {
         ),
         const SizedBox(height: 14),
         _BonfireSurface(
+          borderTint: _ProfilePalette.tealAccent,
           child: Column(
             children: [
               _BonfireRow(
                 icon: Icons.settings_outlined,
                 title: 'Settings',
                 trailingIcon: Icons.chevron_right_rounded,
+                iconColor: _ProfilePalette.primaryBlue,
                 onTap: () => Navigator.of(context).push(
                   MaterialPageRoute(builder: (_) => const _SettingsScreen()),
                 ),
@@ -242,14 +272,15 @@ class _UserScreenState extends State<UserScreen> {
               _BonfireRow(
                 icon: Icons.logout_rounded,
                 title: 'Sign out',
+                iconColor: _ProfilePalette.tealAccent,
                 onTap: () => _supabase.auth.signOut(),
               ),
               const _BonfireDivider(),
               _BonfireRow(
                 icon: Icons.delete_outline_rounded,
-                iconColor: const Color(0xFFFF6A4D),
+                iconColor: _ProfilePalette.danger,
                 title: 'Delete account',
-                titleColor: const Color(0xFFFF6A4D),
+                titleColor: _ProfilePalette.danger,
                 subtitle: 'Permanently delete your account and data',
                 onTap: _isDeletingAccount ? null : _confirmAccountDeletion,
               ),
@@ -263,10 +294,9 @@ class _UserScreenState extends State<UserScreen> {
               _errorMessage!,
               textAlign: TextAlign.center,
               style: const TextStyle(
-                color: Color(0xFFFFB4A8),
-                fontWeight: FontWeight.w600,
+                color: _ProfilePalette.danger,
+                fontWeight: FontWeight.w700,
                 height: 1.25,
-                shadows: [Shadow(color: Color(0xAA000000), blurRadius: 10)],
               ),
             ),
           ),
@@ -334,11 +364,11 @@ class _DeleteAccountConfirmationDialogState
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
-      backgroundColor: const Color(0xFF121636),
+      backgroundColor: _ProfilePalette.surface,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
       title: const Text(
         'Delete account',
-        style: TextStyle(color: Colors.white, fontWeight: FontWeight.w800),
+        style: TextStyle(color: _ProfilePalette.text, fontWeight: FontWeight.w800),
       ),
       content: Column(
         mainAxisSize: MainAxisSize.min,
@@ -346,19 +376,19 @@ class _DeleteAccountConfirmationDialogState
         children: [
           const Text(
             'This is permanent. Your Bonfire account and associated data will be deleted.',
-            style: TextStyle(color: Color(0xCCFFFFFF)),
+            style: TextStyle(color: _ProfilePalette.textMuted),
           ),
           const SizedBox(height: 12),
           const Text(
             'Type LET IT BURN to confirm.',
-            style: TextStyle(color: Color(0xCCFFFFFF)),
+            style: TextStyle(color: _ProfilePalette.textMuted),
           ),
           const SizedBox(height: 8),
           TextField(
             controller: _controller,
             autofocus: true,
             onChanged: (_) => setState(() {}),
-            style: const TextStyle(color: Colors.white),
+            style: const TextStyle(color: _ProfilePalette.text),
             decoration: const InputDecoration(hintText: 'LET IT BURN'),
           ),
         ],
@@ -366,7 +396,7 @@ class _DeleteAccountConfirmationDialogState
       actions: [
         TextButton(
           onPressed: () => Navigator.of(context).pop(false),
-          style: TextButton.styleFrom(foregroundColor: const Color(0xCCFFFFFF)),
+          style: TextButton.styleFrom(foregroundColor: _ProfilePalette.textMuted),
           child: const Text('Cancel'),
         ),
         ElevatedButton(
@@ -374,11 +404,10 @@ class _DeleteAccountConfirmationDialogState
               ? () => Navigator.of(context).pop(true)
               : null,
           style: ElevatedButton.styleFrom(
-            backgroundColor: const Color(0xFFB3261E),
+            backgroundColor: _ProfilePalette.danger,
             foregroundColor: Colors.white,
-            disabledBackgroundColor: const Color(
-              0xFFB3261E,
-            ).withValues(alpha: 0.5),
+            disabledBackgroundColor:
+                _ProfilePalette.danger.withValues(alpha: 0.5),
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(14),
             ),
@@ -394,17 +423,17 @@ class _FriendsScreen extends StatelessWidget {
   const _FriendsScreen();
   @override
   Widget build(BuildContext context) => Scaffold(
-    backgroundColor: const Color(0xFF0B1020),
+    backgroundColor: _ProfilePalette.background,
     appBar: AppBar(
-      backgroundColor: const Color(0xFF121636),
-      foregroundColor: Colors.white,
+      backgroundColor: _ProfilePalette.surface,
+      foregroundColor: _ProfilePalette.text,
       title: const Text('Friends / Following'),
     ),
     body: const SafeArea(
       child: Center(
         child: Text(
           'Your friends will appear here.',
-          style: TextStyle(color: Color(0xCCFFFFFF)),
+          style: TextStyle(color: _ProfilePalette.textMuted),
         ),
       ),
     ),
@@ -415,17 +444,17 @@ class _SettingsScreen extends StatelessWidget {
   const _SettingsScreen();
   @override
   Widget build(BuildContext context) => Scaffold(
-    backgroundColor: const Color(0xFF0B1020),
+    backgroundColor: _ProfilePalette.background,
     appBar: AppBar(
-      backgroundColor: const Color(0xFF121636),
-      foregroundColor: Colors.white,
+      backgroundColor: _ProfilePalette.surface,
+      foregroundColor: _ProfilePalette.text,
       title: const Text('Settings'),
     ),
     body: const SafeArea(
       child: Center(
         child: Text(
           'Account settings',
-          style: TextStyle(color: Color(0xCCFFFFFF)),
+          style: TextStyle(color: _ProfilePalette.textMuted),
         ),
       ),
     ),
@@ -437,21 +466,21 @@ InputDecorationTheme _profileInputTheme() {
 
   return const InputDecorationTheme(
     filled: true,
-    fillColor: Color(0x14FFFFFF),
+    fillColor: _ProfilePalette.surface,
     contentPadding: EdgeInsets.symmetric(horizontal: 14, vertical: 14),
     border: OutlineInputBorder(borderRadius: borderRadius),
     enabledBorder: OutlineInputBorder(
       borderRadius: borderRadius,
-      borderSide: BorderSide(color: Color(0x26FFFFFF)),
+      borderSide: BorderSide(color: _ProfilePalette.border),
     ),
     focusedBorder: OutlineInputBorder(
       borderRadius: borderRadius,
-      borderSide: BorderSide(color: Color(0xFF7C4DFF), width: 2),
+      borderSide: BorderSide(color: _ProfilePalette.primaryBlue, width: 2),
     ),
-    labelStyle: TextStyle(color: Color(0xCCFFFFFF)),
-    hintStyle: TextStyle(color: Color(0x80FFFFFF)),
-    prefixIconColor: Color(0xCCFFFFFF),
-    suffixIconColor: Color(0xCCFFFFFF),
+    labelStyle: TextStyle(color: _ProfilePalette.textMuted),
+    hintStyle: TextStyle(color: _ProfilePalette.textMuted),
+    prefixIconColor: _ProfilePalette.tealAccent,
+    suffixIconColor: _ProfilePalette.iconMuted,
   );
 }
 
@@ -483,21 +512,21 @@ class _BonfireAvatar extends StatelessWidget {
       height: 72,
       decoration: BoxDecoration(
         shape: BoxShape.circle,
-        border: Border.all(color: const Color(0x66FFB56A), width: 2),
-        boxShadow: const [
+        border: Border.all(color: _ProfilePalette.primaryBlueSoft, width: 2),
+        boxShadow: [
           BoxShadow(
-            color: Color(0x33000000),
+            color: _ProfilePalette.primaryBlue.withValues(alpha: 0.18),
             blurRadius: 18,
-            offset: Offset(0, 10),
+            offset: const Offset(0, 10),
           ),
         ],
       ),
       child: CircleAvatar(
-        backgroundColor: const Color(0xFF102233),
+        backgroundColor: _ProfilePalette.surfaceAlt,
         child: Text(
           initials,
           style: const TextStyle(
-            color: Colors.white,
+            color: _ProfilePalette.text,
             fontWeight: FontWeight.w800,
             fontSize: 18,
           ),
@@ -508,22 +537,30 @@ class _BonfireAvatar extends StatelessWidget {
 }
 
 class _BonfireSurface extends StatelessWidget {
-  const _BonfireSurface({required this.child});
+  const _BonfireSurface({required this.child, this.borderTint});
 
   final Widget child;
+  final Color? borderTint;
 
   @override
   Widget build(BuildContext context) {
+    final borderColor = Color.lerp(
+          _ProfilePalette.border,
+          borderTint ?? _ProfilePalette.border,
+          borderTint == null ? 0.0 : 0.15,
+        ) ??
+        _ProfilePalette.border;
+
     return Container(
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(16),
-        color: const Color(0xFF121636),
-        border: Border.all(color: const Color(0x1AFFFFFF)),
-        boxShadow: const [
+        color: _ProfilePalette.surface,
+        border: Border.all(color: borderColor),
+        boxShadow: [
           BoxShadow(
-            color: Color(0x55000000),
-            blurRadius: 18,
-            offset: Offset(0, 12),
+            color: Colors.black.withValues(alpha: 0.08),
+            blurRadius: 14,
+            offset: const Offset(0, 10),
           ),
         ],
       ),
@@ -539,7 +576,7 @@ class _BonfireDivider extends StatelessWidget {
   Widget build(BuildContext context) {
     return const Padding(
       padding: EdgeInsets.only(left: 46),
-      child: Divider(height: 1, thickness: 1, color: Color(0x1AFFFFFF)),
+      child: Divider(height: 1, thickness: 1, color: _ProfilePalette.border),
     );
   }
 }
@@ -567,8 +604,20 @@ class _BonfireRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final effectiveIconColor = iconColor ?? const Color(0xFFFF9A3D);
-    final effectiveTitleColor = titleColor ?? Colors.white;
+    final effectiveIconColor = iconColor ?? _ProfilePalette.primaryBlue;
+    final effectiveTitleColor = titleColor ?? _ProfilePalette.text;
+    final iconTileBg = Color.lerp(
+          _ProfilePalette.surfaceAlt,
+          effectiveIconColor,
+          0.10,
+        ) ??
+        _ProfilePalette.surfaceAlt;
+    final iconTileBorder = Color.lerp(
+          _ProfilePalette.border,
+          effectiveIconColor,
+          0.18,
+        ) ??
+        _ProfilePalette.border;
 
     final row = Row(
       crossAxisAlignment: subtitle == null
@@ -579,9 +628,9 @@ class _BonfireRow extends StatelessWidget {
           width: 34,
           height: 34,
           decoration: BoxDecoration(
-            color: const Color(0x1AFFFFFF),
+            color: iconTileBg,
             borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: const Color(0x26FFFFFF)),
+            border: Border.all(color: iconTileBorder),
           ),
           child: Icon(icon, color: effectiveIconColor, size: 18),
         ),
@@ -601,7 +650,10 @@ class _BonfireRow extends StatelessWidget {
                 const SizedBox(height: 2),
                 Text(
                   subtitle!,
-                  style: const TextStyle(color: Color(0xB3FFFFFF), height: 1.2),
+                  style: const TextStyle(
+                    color: _ProfilePalette.textMuted,
+                    height: 1.2,
+                  ),
                 ),
               ],
             ],
@@ -611,12 +663,12 @@ class _BonfireRow extends StatelessWidget {
           Text(
             trailingText!,
             style: const TextStyle(
-              color: Color(0xCCFFFFFF),
+              color: _ProfilePalette.textMuted,
               fontWeight: FontWeight.w700,
             ),
           )
         else if (trailingIcon != null)
-          Icon(trailingIcon, color: const Color(0xCCFFFFFF)),
+          Icon(trailingIcon, color: _ProfilePalette.iconMuted),
       ],
     );
 
@@ -647,16 +699,16 @@ class _ProfileHeader extends StatelessWidget {
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
           colors: [
-            Color(0xFF7C4DFF), // purple
-            Color(0xFF3D8BFF), // blue
-            Color(0xFFFF4F8D), // pink
+            Color(0xFF2F6FEB), // blue
+            Color(0xFF6FA8FF), // soft blue
+            Color(0xFF2BA6A6), // teal
           ],
         ),
         boxShadow: const [
           BoxShadow(
-            color: Color(0x66000000),
-            blurRadius: 20,
-            offset: Offset(0, 14),
+            color: Color(0x1F2F6FEB),
+            blurRadius: 18,
+            offset: Offset(0, 12),
           ),
         ],
       ),
@@ -696,8 +748,13 @@ class _ProfileHeader extends StatelessWidget {
             height: 10,
             decoration: const BoxDecoration(
               shape: BoxShape.circle,
-              color: Color(0xFFFF9A3D),
-              boxShadow: [BoxShadow(color: Color(0x66FF9A3D), blurRadius: 10)],
+              color: _ProfilePalette.bonfireOrange,
+              boxShadow: [
+                BoxShadow(
+                  color: Color(0x33FF9A3D),
+                  blurRadius: 10,
+                ),
+              ],
             ),
           ),
         ],
