@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:ui' as ui;
 
+import 'package:campus_app/data/campus_boundary.dart';
 import 'package:campus_app/data/campus_locations.dart';
 import 'package:campus_app/models/activity.dart';
 import 'package:campus_app/screens/activities/create_activity_screen.dart';
@@ -226,6 +227,18 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
   static const String _skinSourceId = 'bonfire-campus-map-skin';
   static const String _skinLayerId = 'bonfire-campus-map-skin-layer';
 
+  // ============================================================
+  // UTRGV CAMPUS POLYGON OVERLAY
+  // ============================================================
+  static const String _campusBoundarySourceId =
+      'bonfire-utrgv-edinburg-campus-boundary';
+  static const String _campusBoundaryFillLayerId =
+      'bonfire-utrgv-edinburg-campus-boundary-fill-layer';
+  static const String _campusBoundaryOutlineLayerId =
+      'bonfire-utrgv-edinburg-campus-boundary-outline-layer';
+  static const String _legacyCampusBoundaryLayerId =
+      'bonfire-utrgv-edinburg-campus-boundary-layer';
+
   static final Point utrgvEdinburgCampus = Point(
     coordinates: Position(-98.174165, 26.304551),
   );
@@ -366,6 +379,7 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
       false,
     );
     await _addCampusMapSkin();
+    await _addUtrgvEdinburgCampusBoundaryOverlay();
   }
 
   Future<void> _addCampusMapSkin() async {
@@ -480,6 +494,62 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
       debugPrint('🔥 CAMPUS MAP SKIN ERROR: $error');
 
       debugPrint(stackTrace.toString());
+    }
+  }
+
+  Future<void> _addUtrgvEdinburgCampusBoundaryOverlay() async {
+    final map = _mapboxMap;
+    if (map == null) return;
+
+    final style = map.style;
+
+    // Ensure we never show polygon outlines for the campus overlay.
+    // (Also removes a legacy single-layer implementation that included an outline.)
+    final legacyLayerExists =
+        await style.styleLayerExists(_legacyCampusBoundaryLayerId);
+    if (legacyLayerExists) {
+      await style.removeStyleLayer(_legacyCampusBoundaryLayerId);
+    }
+    final outlineLayerExists =
+        await style.styleLayerExists(_campusBoundaryOutlineLayerId);
+    if (outlineLayerExists) {
+      await style.removeStyleLayer(_campusBoundaryOutlineLayerId);
+    }
+
+    final sourceExists = await style.styleSourceExists(_campusBoundarySourceId);
+    if (!sourceExists) {
+      await style.addSource(
+        GeoJsonSource(
+          id: _campusBoundarySourceId,
+          data: utrgvEdinburgCampusBoundaryGeoJson,
+        ),
+      );
+    } else {
+      final source =
+          await style.getSource(_campusBoundarySourceId) as GeoJsonSource;
+      await source.updateGeoJSON(utrgvEdinburgCampusBoundaryGeoJson);
+    }
+
+    final fillLayerExists =
+        await style.styleLayerExists(_campusBoundaryFillLayerId);
+    if (!fillLayerExists) {
+      await style.addLayer(
+        FillLayer(
+          id: _campusBoundaryFillLayerId,
+          sourceId: _campusBoundarySourceId,
+          // Keep it above the basemap details; polygons are still translucent.
+          slot: 'top',
+          // Style is driven from each GeoJSON feature's properties.
+          fillColorExpression: const ['to-color', ['get', 'fill']],
+          fillOpacityExpression: const [
+            // Cap per-feature opacity so the overlay stays subtle and the
+            // basemap remains clearly visible.
+            'min',
+            ['coalesce', ['get', 'fill-opacity'], 0.55],
+            0.15,
+          ],
+        ),
+      );
     }
   }
 
