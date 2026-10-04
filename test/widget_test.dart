@@ -3,7 +3,6 @@ import 'package:campus_app/models/activity.dart';
 import 'package:campus_app/screens/map_screen.dart';
 import 'package:campus_app/data/campus_locations.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:mapbox_maps_flutter/mapbox_maps_flutter.dart';
 
 Activity _testActivity({bool hasJoined = false}) => Activity(
   id: 'marker-test',
@@ -57,62 +56,33 @@ void main() {
     expect(message, contains('indoor'));
   });
 
-  test(
-    'nearby activity markers get a small visual offset without altering stored coordinates',
-    () {
-      final first = Activity(
-        id: 'a1',
-        creatorId: 'user-1',
-        title: 'Math club',
-        description: 'Study session',
-        categoryId: 'study',
-        campus: 'edinburg',
-        latitude: 26.3045,
-        longitude: -98.174,
-        startsAt: DateTime.now().add(const Duration(minutes: 10)),
-        endsAt: DateTime.now().add(const Duration(hours: 1)),
-        indoorOutdoor: 'indoor',
-        building: 'Library',
-        floor: '2',
-        roomOrArea: 'Study Room',
-        ticketStatus: 'Approved',
-        cancelledAt: null,
-        createdAt: DateTime.now(),
-        updatedAt: DateTime.now(),
-      );
+  test('ActivityDraft allows multi-day durations (no 24-hour maximum)', () {
+    final now = DateTime.now();
+    final draft = ActivityDraft(
+      title: 'Multi day spark',
+      description: null,
+      categoryId: 'social',
+      campus: 'edinburg',
+      latitude: 26.3,
+      longitude: -98.17,
+      startsAt: now,
+      endsAt: now.add(const Duration(days: 5)),
+      indoorOutdoor: 'outdoor',
+      building: null,
+      floor: null,
+      roomOrArea: null,
+    );
 
-      final second = Activity(
-        id: 'a2',
-        creatorId: 'user-2',
-        title: 'Pickup soccer',
-        description: 'Five-a-side',
-        categoryId: 'sports',
-        campus: 'edinburg',
-        latitude: 26.30450004,
-        longitude: -98.17399996,
-        startsAt: DateTime.now().add(const Duration(minutes: 20)),
-        endsAt: DateTime.now().add(const Duration(hours: 2)),
-        indoorOutdoor: 'outdoor',
-        building: null,
-        floor: null,
-        roomOrArea: 'Field',
-        ticketStatus: 'Approved',
-        cancelledAt: null,
-        createdAt: DateTime.now(),
-        updatedAt: DateTime.now(),
-      );
+    final message = draft.validate();
+    expect(message, isNull);
+  });
 
-      final position = MapScreen.computeActivityMarkerPosition(second, 1, [
-        first,
-        second,
-      ]);
-
-      expect(position.lng, isNot(equals(second.longitude)));
-      expect(position.lat, isNot(equals(second.latitude)));
-      expect((position.lng - second.longitude).abs(), lessThan(0.001));
-      expect((position.lat - second.latitude).abs(), lessThan(0.001));
-    },
-  );
+  test('activity markers default to true geographic coordinates', () {
+    final activity = _testActivity();
+    final position = MapScreen.trueActivityMarkerPosition(activity);
+    expect(position.lat, equals(activity.latitude));
+    expect(position.lng, equals(activity.longitude));
+  });
 
   test(
     'activity marker visibility prioritizes joined and temporary selection',

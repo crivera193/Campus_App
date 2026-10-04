@@ -5,6 +5,7 @@ class Activity {
   const Activity({
     required this.id,
     required this.creatorId,
+    this.creatorUsername,
     required this.title,
     required this.description,
     required this.categoryId,
@@ -30,6 +31,7 @@ class Activity {
 
   final String id;
   final String creatorId;
+  final String? creatorUsername;
   final String title;
   final String? description;
   final String categoryId;
@@ -63,10 +65,40 @@ class Activity {
 
   ActivityCategory get category => ActivityCategory.fromId(categoryId);
 
+  Activity copyWith({String? creatorUsername}) {
+    return Activity(
+      id: id,
+      creatorId: creatorId,
+      creatorUsername: creatorUsername ?? this.creatorUsername,
+      title: title,
+      description: description,
+      categoryId: categoryId,
+      campus: campus,
+      latitude: latitude,
+      longitude: longitude,
+      startsAt: startsAt,
+      endsAt: endsAt,
+      indoorOutdoor: indoorOutdoor,
+      building: building,
+      floor: floor,
+      roomOrArea: roomOrArea,
+      ticketStatus: ticketStatus,
+      cancelledAt: cancelledAt,
+      createdAt: createdAt,
+      updatedAt: updatedAt,
+      maxParticipants: maxParticipants,
+      participantCount: participantCount,
+      hasJoined: hasJoined,
+      isOwner: isOwner,
+      isOpen: isOpen,
+    );
+  }
+
   factory Activity.fromMap(Map<String, dynamic> map) {
     return Activity(
       id: map['id'] as String,
       creatorId: map['creator_id'] as String,
+      creatorUsername: map['creator_username'] as String?,
       title: map['title'] as String,
       description: map['description'] as String?,
       categoryId: map['category'] as String,
@@ -196,10 +228,6 @@ class ActivityDraft {
 
     if (!endsAt.isAfter(startsAt)) {
       errors.add('End time must be after the start time.');
-    }
-
-    if (endsAt.difference(startsAt) > const Duration(days: 1)) {
-      errors.add('Activities can last no longer than 24 hours.');
     }
 
     if (maxParticipants != null && maxParticipants! < 1) {
