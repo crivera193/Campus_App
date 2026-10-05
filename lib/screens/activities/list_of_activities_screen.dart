@@ -998,7 +998,7 @@ class _ActivityListScreenState extends State<ActivityListScreen> {
                       const SizedBox(height: 4),
 
                       Text(
-                        activity.category.label,
+                        '${activity.activityLevel} • ${activity.category.label}',
 
                         style: TextStyle(color: textColor),
                       ),

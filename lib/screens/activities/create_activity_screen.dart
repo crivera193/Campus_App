@@ -1,7 +1,7 @@
 import 'package:campus_app/models/activity.dart';
 import 'package:campus_app/models/activity_category.dart';
 import 'package:campus_app/services/activity_repository.dart';
-import 'package:campus_app/services/campus_location_resolver.dart';
+import 'package:campus_app/services/campus_building_resolver.dart';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:campus_app/screens/activities/activity_location_picker_screen.dart';
@@ -27,7 +27,6 @@ class _CreateActivityScreenState extends State<CreateActivityScreen> {
   final _formKey = GlobalKey<FormState>();
   final _titleController = TextEditingController();
   final _descriptionController = TextEditingController();
-  final _buildingController = TextEditingController();
   final _floorController = TextEditingController();
   final _roomOrAreaController = TextEditingController();
   final _maxParticipantsController = TextEditingController();
@@ -36,7 +35,7 @@ class _CreateActivityScreenState extends State<CreateActivityScreen> {
   late DateTime _startsAt;
   late DateTime _endsAt;
   String? _categoryId;
-  String? _indoorOutdoor;
+  String? _activityLevel;
   double? _latitude;
   double? _longitude;
   String? _locationError;
@@ -57,7 +56,6 @@ class _CreateActivityScreenState extends State<CreateActivityScreen> {
   void dispose() {
     _titleController.dispose();
     _descriptionController.dispose();
-    _buildingController.dispose();
     _floorController.dispose();
     _roomOrAreaController.dispose();
     _maxParticipantsController.dispose();
@@ -84,8 +82,6 @@ class _CreateActivityScreenState extends State<CreateActivityScreen> {
     setState(() {
       _latitude = selectedLocation.coordinates.lat.toDouble();
       _longitude = selectedLocation.coordinates.lng.toDouble();
-      _buildingController.text =
-          CampusLocationResolver.resolve(_latitude!, _longitude!) ?? '';
       _locationError = null;
     });
   }
@@ -150,21 +146,27 @@ class _CreateActivityScreenState extends State<CreateActivityScreen> {
     final effectiveStart = _startNow ? DateTime.now() : _startsAt;
     final duration = _endsAt.difference(_startsAt);
     final effectiveEnd = _startNow ? effectiveStart.add(duration) : _endsAt;
-    final resolvedBuilding = CampusLocationResolver.resolve(
+    final buildingResolution = CampusBuildingResolver.resolveForCreation(
       _latitude!,
       _longitude!,
     );
+
+    final resolvedIndoorOutdoor =
+        buildingResolution.isInsideBuilding ? 'indoor' : 'outdoor';
+    final resolvedBuildingShortName = buildingResolution.area.shortName;
+
     final draft = ActivityDraft(
       title: _titleController.text.trim(),
       description: _optionalValue(_descriptionController.text),
       categoryId: _categoryId ?? '',
+      activityLevel: _activityLevel ?? '',
       campus: widget.campus,
       latitude: _latitude ?? 0,
       longitude: _longitude ?? 0,
       startsAt: effectiveStart,
       endsAt: effectiveEnd,
-      indoorOutdoor: _indoorOutdoor ?? '',
-      building: resolvedBuilding ?? _optionalValue(_buildingController.text),
+      indoorOutdoor: resolvedIndoorOutdoor,
+      building: resolvedBuildingShortName,
       floor: _optionalValue(_floorController.text),
       roomOrArea: _optionalValue(_roomOrAreaController.text),
       maxParticipants: int.tryParse(_maxParticipantsController.text.trim()),
@@ -263,41 +265,68 @@ class _CreateActivityScreenState extends State<CreateActivityScreen> {
               ),
               const SizedBox(height: 24),
 
-              _sectionTitle(context, 'Category'),
+              _sectionTitle(context, 'Activity Level'),
               const SizedBox(height: 8),
 
               FormField<String>(
-                validator: (value) =>
-                    value == null ? 'Select a category.' : null,
-                builder: (field) => InputDecorator(
-                  decoration: InputDecoration(
-                    border: const OutlineInputBorder(),
-                    errorText: field.errorText,
-                    contentPadding: const EdgeInsets.all(12),
-                  ),
-                  child: Wrap(
-                    spacing: 8,
-                    runSpacing: 8,
-                    children: ActivityCategory.all
-                        .map(
-                          (category) => ChoiceChip(
-                            label: Text(category.label),
-                            avatar: Icon(category.icon, size: 18),
-                            selected: _categoryId == category.id,
-                            selectedColor: category.color.withValues(
-                              alpha: 0.2,
-                            ),
-                            onSelected: (_) {
-                              setState(() {
-                                _categoryId = category.id;
-                              });
-                              field.didChange(category.id);
-                            },
-                          ),
-                        )
-                        .toList(),
-                  ),
+                // The cards and the submitted draft both use this state
+                // variable. Validate it directly so FormField's internal
+                // value cannot drift out of sync with the selected card.
+                validator: (_) => !ActivityLevel.all.any(
+                  (level) => level.value == _activityLevel,
+                )
+                    ? 'Select an activity level.'
+                    : null,
+                builder: (field) => Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    for (final level in ActivityLevel.all) ...[
+                      _ActivityLevelOption(
+                        level: level,
+                        selected: _activityLevel == level.value,
+                        onTap: () {
+                          setState(() => _activityLevel = level.value);
+                          field.didChange(level.value);
+                        },
+                      ),
+                      if (level != ActivityLevel.all.last)
+                        const SizedBox(height: 8),
+                    ],
+                    if (field.errorText != null) ...[
+                      const SizedBox(height: 6),
+                      Text(
+                        field.errorText!,
+                        style: TextStyle(
+                          color: Theme.of(context).colorScheme.error,
+                          fontSize: 12,
+                        ),
+                      ),
+                    ],
+                  ],
                 ),
+              ),
+
+              const SizedBox(height: 20),
+
+              _sectionTitle(context, 'Category'),
+              const SizedBox(height: 8),
+
+              DropdownButtonFormField<String>(
+                initialValue: _categoryId,
+                decoration: const InputDecoration(
+                  labelText: 'Choose a category',
+                  border: OutlineInputBorder(),
+                ),
+                items: ActivityCategory.all
+                    .map((category) => DropdownMenuItem(
+                          value: category.id,
+                          child: Text(category.label),
+                        ))
+                    .toList(),
+                validator: (value) => value == null
+                    ? 'Select a category.'
+                    : null,
+                onChanged: (value) => setState(() => _categoryId = value),
               ),
 
               const SizedBox(height: 20),
@@ -343,7 +372,6 @@ class _CreateActivityScreenState extends State<CreateActivityScreen> {
               const SizedBox(height: 8),
 
               _LocationCard(
-                campus: widget.campus,
                 latitude: _latitude,
                 longitude: _longitude,
                 onChooseLocation: _chooseLocation,
@@ -356,39 +384,6 @@ class _CreateActivityScreenState extends State<CreateActivityScreen> {
                   style: TextStyle(color: Theme.of(context).colorScheme.error),
                 ),
               ],
-
-              const SizedBox(height: 20),
-
-              _sectionTitle(context, 'Place details'),
-              const SizedBox(height: 8),
-
-              DropdownButtonFormField<String>(
-                initialValue: _indoorOutdoor,
-                decoration: const InputDecoration(
-                  labelText: 'Indoor or outdoor',
-                  border: OutlineInputBorder(),
-                ),
-                items: const [
-                  DropdownMenuItem(value: 'indoor', child: Text('Indoor')),
-                  DropdownMenuItem(value: 'outdoor', child: Text('Outdoor')),
-                ],
-                onChanged: (value) => setState(() {
-                  _indoorOutdoor = value;
-                }),
-                validator: (value) =>
-                    value == null ? 'Choose indoor or outdoor.' : null,
-              ),
-
-              const SizedBox(height: 16),
-
-              TextFormField(
-                controller: _buildingController,
-                textInputAction: TextInputAction.next,
-                decoration: const InputDecoration(
-                  labelText: 'Building (optional)',
-                  border: OutlineInputBorder(),
-                ),
-              ),
 
               const SizedBox(height: 16),
 
@@ -564,15 +559,94 @@ class _CreateActivityScreenState extends State<CreateActivityScreen> {
   }
 }
 
+class _ActivityLevelOption extends StatelessWidget {
+  const _ActivityLevelOption({
+    required this.level,
+    required this.selected,
+    required this.onTap,
+  });
+
+  final ActivityLevel level;
+  final bool selected;
+  final VoidCallback onTap;
+
+  String get _description => switch (level.value) {
+    'Campus-Wide' =>
+      'Open to the broader UTRGV community; major or official activities.',
+    'Organization' =>
+      'Hosted by an established club, organization, department, or group.',
+    'Community' => 'Student-created activity intended for multiple people.',
+    'Personal' => 'Very small or casual activity intended for a few people.',
+    _ => '',
+  };
+
+  @override
+  Widget build(BuildContext context) {
+    const accent = Color(0xFFE65100);
+    return Semantics(
+      button: true,
+      selected: selected,
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(12),
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 140),
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+            decoration: BoxDecoration(
+              color: selected ? accent.withValues(alpha: 0.08) : Colors.white,
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(
+                color: selected ? accent : const Color(0xFFD8D0CB),
+                width: selected ? 2 : 1,
+              ),
+            ),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        level.value,
+                        style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                              fontWeight: FontWeight.w700,
+                              color: selected ? accent : null,
+                            ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        _description,
+                        style: Theme.of(context).textTheme.bodySmall,
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Icon(
+                  selected
+                      ? Icons.radio_button_checked
+                      : Icons.radio_button_unchecked,
+                  color: selected ? accent : Colors.black38,
+                  size: 20,
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class _LocationCard extends StatelessWidget {
   const _LocationCard({
-    required this.campus,
     required this.latitude,
     required this.longitude,
     required this.onChooseLocation,
   });
 
-  final String campus;
   final double? latitude;
   final double? longitude;
   final VoidCallback onChooseLocation;
@@ -580,46 +654,16 @@ class _LocationCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final hasLocation = latitude != null && longitude != null;
-    final campusLabel = campus == 'brownsville' ? 'Brownsville' : 'Edinburg';
-
-    return Container(
+    return SizedBox(
       width: double.infinity,
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: Theme.of(context).colorScheme.surfaceContainerHighest,
-        borderRadius: BorderRadius.circular(12),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Icon(Icons.location_on_outlined),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Text(
-                  hasLocation
-                      ? 'Location selected. $campusLabel is the campus label; place this Spark anywhere.\n'
-                            'Latitude ${latitude!.toStringAsFixed(6)}, '
-                            'longitude ${longitude!.toStringAsFixed(6)}.'
-                      : 'Choose where your activity will take place.',
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 12),
-          SizedBox(
-            width: double.infinity,
-            child: OutlinedButton.icon(
-              onPressed: onChooseLocation,
-              icon: const Icon(Icons.map_outlined),
-              label: Text(
-                hasLocation ? 'Change location' : 'Choose location on map',
-              ),
-            ),
-          ),
-        ],
+      child: OutlinedButton.icon(
+        onPressed: onChooseLocation,
+        icon: const Icon(Icons.map_outlined),
+        label: Text(hasLocation ? 'Change location' : 'Choose location on map'),
+        style: OutlinedButton.styleFrom(
+          minimumSize: const Size.fromHeight(52),
+          alignment: Alignment.centerLeft,
+        ),
       ),
     );
   }

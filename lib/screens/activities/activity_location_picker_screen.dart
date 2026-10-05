@@ -1,5 +1,6 @@
 import 'dart:typed_data';
 import 'dart:ui' as ui;
+import 'package:campus_app/services/campus_building_resolver.dart';
 import 'package:flutter/material.dart';
 import 'package:mapbox_maps_flutter/mapbox_maps_flutter.dart';
 import 'package:permission_handler/permission_handler.dart';
@@ -20,6 +21,7 @@ class ActivityLocationPickerScreen extends StatefulWidget {
 class _ActivityLocationPickerScreenState
     extends State<ActivityLocationPickerScreen> {
   late Point _selectedLocation;
+  CampusBuildingResolution? _detectedBuilding;
 
   MapboxMap? _mapboxMap;
   PointAnnotationManager? _pointAnnotationManager; //control pin
@@ -36,6 +38,7 @@ class _ActivityLocationPickerScreenState
   void initState() {
     super.initState();
     _selectedLocation = widget.initialLocation;
+    _refreshDetectedBuilding();
     _viewport = CameraViewportState(
       center: widget.initialLocation,
       zoom: 16.0,
@@ -80,6 +83,13 @@ class _ActivityLocationPickerScreenState
         .createPointAnnotationManager();
 
     _pinImage = await _createPinImage();
+    await _movePinToSelectedLocation();
+  }
+
+  void _refreshDetectedBuilding() {
+    final lat = _selectedLocation.coordinates.lat.toDouble();
+    final lon = _selectedLocation.coordinates.lng.toDouble();
+    _detectedBuilding = CampusBuildingResolver.resolveForCreation(lat, lon);
   }
 
   Future<void> _toggleCenter() async {
@@ -129,7 +139,10 @@ class _ActivityLocationPickerScreenState
   }
 
   Future<void> _onMapTap(MapContentGestureContext context) async {
-    _selectedLocation = context.point;
+    setState(() {
+      _selectedLocation = context.point;
+      _refreshDetectedBuilding();
+    });
 
     await _movePinToSelectedLocation();
   }
@@ -161,6 +174,17 @@ class _ActivityLocationPickerScreenState
 
   @override
   Widget build(BuildContext context) {
+    final r = _detectedBuilding;
+    final hasDetected = r != null;
+    final indoorOutdoorLabel = !hasDetected
+        ? '—'
+        : (r.isInsideBuilding ? 'Indoor' : 'Outdoor');
+    final buildingLabel = !hasDetected
+        ? '—'
+        : (r.isInsideBuilding
+              ? '${r.area.shortName} — ${r.area.fullName}'
+              : '${r.area.shortName} — ${r.area.fullName} (nearest)');
+
     return Scaffold(
       appBar: AppBar(title: const Text('Choose activity location')),
       body: Stack(
@@ -198,19 +222,21 @@ class _ActivityLocationPickerScreenState
             bottom: 16,
             child: SafeArea(
               child: Card(
-                child: Padding(
-                  padding: const EdgeInsets.all(16),
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      const Text(
-                        'Tap the map to choose where your activity will be.',
-                        textAlign: TextAlign.center,
-                      ),
-                      const SizedBox(height: 12),
-                      SizedBox(
-                        width: double.infinity,
-                        child: FilledButton(
+                  child: Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          'Tap the map to choose where your activity will be.\n'
+                          'Building: $buildingLabel\n'
+                          'Indoor/Outdoor: $indoorOutdoorLabel',
+                          textAlign: TextAlign.center,
+                        ),
+                        const SizedBox(height: 12),
+                        SizedBox(
+                          width: double.infinity,
+                          child: FilledButton(
                           onPressed: _confirmLocation,
                           child: const Text('Use this location'),
                         ),

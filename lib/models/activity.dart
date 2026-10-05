@@ -1,5 +1,39 @@
 import 'activity_category.dart';
 
+/// Scope and officialness of an activity. These values must match Supabase.
+class ActivityLevel {
+  const ActivityLevel({required this.value, required this.description});
+
+  final String value;
+  final String description;
+
+  static const campusWide = ActivityLevel(
+    value: 'Campus-Wide',
+    description: 'Open to the broader UTRGV community; major or official activity.',
+  );
+  static const organization = ActivityLevel(
+    value: 'Organization',
+    description: 'Hosted by an established club, organization, department, or group.',
+  );
+  static const community = ActivityLevel(
+    value: 'Community',
+    description: 'Student-created activity intended for multiple people.',
+  );
+  static const personal = ActivityLevel(
+    value: 'Personal',
+    description: 'Very small or casual activity intended for a few people.',
+  );
+
+  static const all = [campusWide, organization, community, personal];
+
+  static ActivityLevel? fromValue(String? value) {
+    for (final level in all) {
+      if (level.value == value) return level;
+    }
+    return null;
+  }
+}
+
 /// A temporary, student-created activity displayed on the campus map.
 class Activity {
   const Activity({
@@ -9,6 +43,7 @@ class Activity {
     required this.title,
     required this.description,
     required this.categoryId,
+    required this.activityLevel,
     required this.campus,
     required this.latitude,
     required this.longitude,
@@ -35,6 +70,7 @@ class Activity {
   final String title;
   final String? description;
   final String categoryId;
+  final String activityLevel;
   final String campus;
   final double latitude;
   final double longitude;
@@ -73,6 +109,7 @@ class Activity {
       title: title,
       description: description,
       categoryId: categoryId,
+      activityLevel: activityLevel,
       campus: campus,
       latitude: latitude,
       longitude: longitude,
@@ -102,6 +139,9 @@ class Activity {
       title: map['title'] as String,
       description: map['description'] as String?,
       categoryId: map['category'] as String,
+      // Older deployments may expose a cached view definition without this
+      // newly added column until that view is refreshed.
+      activityLevel: map['activity_level'] as String? ?? ActivityLevel.community.value,
       campus: map['campus'] as String,
       latitude: _asDouble(map['latitude']),
       longitude: _asDouble(map['longitude']),
@@ -157,6 +197,7 @@ class ActivityDraft {
     required this.title,
     required this.description,
     required this.categoryId,
+    required this.activityLevel,
     required this.campus,
     required this.latitude,
     required this.longitude,
@@ -172,6 +213,7 @@ class ActivityDraft {
   final String title;
   final String? description;
   final String categoryId;
+  final String activityLevel;
   final String campus;
   final double latitude;
   final double longitude;
@@ -201,6 +243,10 @@ class ActivityDraft {
     if (categoryId.trim().isEmpty ||
         !ActivityCategory.all.any((category) => category.id == categoryId)) {
       errors.add('Choose a valid activity category.');
+    }
+
+    if (!ActivityLevel.all.any((level) => level.value == activityLevel)) {
+      errors.add('Choose a valid activity level.');
     }
 
     // Campus is the activity's campus label; coordinates themselves may be
@@ -246,6 +292,7 @@ class ActivityDraft {
       'title': title.trim(),
       'description': description,
       'category': categoryId,
+      'activity_level': activityLevel,
       'campus': campus.trim().toLowerCase(),
       'latitude': latitude,
       'longitude': longitude,

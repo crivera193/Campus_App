@@ -105,7 +105,7 @@ class ActivityDetailsContent extends StatelessWidget {
         const SizedBox(height: 8),
         Text(
           [
-            '${activity.category.label} • ${_capitalize(activity.campus)} campus',
+            '${activity.activityLevel} • ${activity.category.label} • ${_capitalize(activity.campus)} campus',
             if (activity.creatorUsername != null &&
                 activity.creatorUsername!.trim().isNotEmpty)
               'by ${activity.creatorUsername}',
