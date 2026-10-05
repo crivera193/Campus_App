@@ -3,6 +3,7 @@ import 'package:campus_app/screens/activities/create_activity_screen.dart';
 import 'package:campus_app/screens/activities/list_of_activities_screen.dart';
 import 'package:campus_app/screens/map_screen.dart';
 import 'package:campus_app/screens/user_screen.dart';
+import 'package:campus_app/theme/faction_accent.dart';
 import 'package:flutter/material.dart';
 
 class MainScreen extends StatefulWidget {
@@ -16,6 +17,7 @@ class _MainScreenState extends State<MainScreen> {
   Activity? _selectedActivity;
   int _mapFocusRequest = 0;
   int _activityRefreshRequest = 0;
+  String? _currentFaction;
 
   void _showActivityOnMap(Activity activity) => setState(() {
     _selectedActivity = activity;
@@ -36,6 +38,8 @@ class _MainScreenState extends State<MainScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final factionColor = FactionAccent.accentForFaction(_currentFaction);
+
     final tabs = <Widget>[
       MapScreen(
         selectedActivity: _selectedActivity,
@@ -48,16 +52,23 @@ class _MainScreenState extends State<MainScreen> {
         onViewOnMap: _showActivityOnMap,
         onMapRefreshRequested: _refreshMapActivities,
       ),
-      const UserScreen(),
+      UserScreen(
+        onFactionChanged: (value) {
+          if (!mounted) return;
+          setState(() => _currentFaction = value);
+        },
+      ),
     ];
     return Scaffold(
       body: IndexedStack(index: _selectedIndex, children: tabs),
       bottomNavigationBar: Container(
-        decoration: const BoxDecoration(
+        decoration: BoxDecoration(
           gradient: LinearGradient(
             begin: Alignment.topCenter,
             end: Alignment.bottomCenter,
-            colors: [Color(0xFF6636A6), Color(0xFFF07832)],
+            // Keep the existing orange as-is. Replace the purple end with the
+            // user's current faction accent color.
+            colors: [factionColor, const Color(0xFFF07832)],
           ),
         ),
         child: SafeArea(

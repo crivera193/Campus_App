@@ -50,6 +50,16 @@ class _AuthGateState extends State<AuthGate> {
             _roleRequest = _loadRole(nextSession.user.id);
           }
         });
+
+        // When a user signs out, AuthGate will rebuild to show LoginScreen.
+        // However, any pushed routes (Settings/Profile/etc.) remain on the
+        // Navigator stack unless we explicitly unwind them.
+        if (nextSession == null) {
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (!mounted) return;
+            Navigator.of(context).popUntil((route) => route.isFirst);
+          });
+        }
       },
       onError: (Object error, StackTrace stackTrace) {
         if (!mounted) return;
