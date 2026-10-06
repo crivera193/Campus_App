@@ -312,4 +312,3 @@ const String utrgvEdinburgCampusBoundaryGeoJson = r'''
   ]
 }
 ''';
-

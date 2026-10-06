@@ -130,7 +130,10 @@ class CampusBuildingResolver {
     return Position(lonSum / count, latSum / count);
   }
 
-  static bool isInsideOutdoorCreationBoundary(double latitude, double longitude) {
+  static bool isInsideOutdoorCreationBoundary(
+    double latitude,
+    double longitude,
+  ) {
     return _pointInPolygon(
       lon: longitude,
       lat: latitude,
@@ -188,7 +191,10 @@ class CampusBuildingResolver {
     double longitude,
   ) {
     final containing = findContainingBuilding(latitude, longitude);
-    final inOutdoorBoundary = isInsideOutdoorCreationBoundary(latitude, longitude);
+    final inOutdoorBoundary = isInsideOutdoorCreationBoundary(
+      latitude,
+      longitude,
+    );
 
     if (containing != null) {
       return CampusBuildingResolution(
@@ -227,13 +233,14 @@ class CampusBuildingResolver {
   }
 
   static List<String> fullNamesForShortName(String shortName) {
-    final names = _areas
-        .where((a) => a.shortName == shortName)
-        .map((a) => a.fullName.trim())
-        .where((n) => n.isNotEmpty)
-        .toSet()
-        .toList()
-      ..sort();
+    final names =
+        _areas
+            .where((a) => a.shortName == shortName)
+            .map((a) => a.fullName.trim())
+            .where((n) => n.isNotEmpty)
+            .toSet()
+            .toList()
+          ..sort();
     return names;
   }
 
@@ -271,7 +278,8 @@ class CampusBuildingResolver {
     final lat0 = lat * math.pi / 180.0;
     const r = 6371000.0;
 
-    double projectX(double lonDeg) => (lonDeg * math.pi / 180.0) * math.cos(lat0) * r;
+    double projectX(double lonDeg) =>
+        (lonDeg * math.pi / 180.0) * math.cos(lat0) * r;
     double projectY(double latDeg) => (latDeg * math.pi / 180.0) * r;
 
     final px = projectX(lon);
