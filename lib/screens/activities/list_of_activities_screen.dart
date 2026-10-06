@@ -4,6 +4,7 @@ import 'dart:math';
 import 'package:campus_app/models/activity.dart';
 import 'package:campus_app/models/activity_category.dart';
 import 'package:campus_app/services/activity_repository.dart';
+import 'package:campus_app/widgets/activity_details_sheet.dart';
 import 'package:flutter/material.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -29,6 +30,13 @@ class ActivityListScreen extends StatefulWidget {
 }
 
 class _ActivityListScreenState extends State<ActivityListScreen> {
+  static const _eventsAccent = Color(0xFFA87555);
+  static const _eventsSurfaceAlt = Color(0xFFF1F3F6);
+  static const _eventsBorder = Color(0xFFE3E6EA);
+  static const _eventsText = Color(0xFF111827);
+  static const _eventsTextMuted = Color(0xFF6B7280);
+  static const _eventsAccentSoft = Color(0xFFF6ECE6);
+
   final ActivityRepository _activityRepository = ActivityRepository();
 
   late Future<List<Activity>> _activitiesFuture;
@@ -40,10 +48,15 @@ class _ActivityListScreenState extends State<ActivityListScreen> {
 
   final Set<String> _walkingEtaLoadingIds = <String>{};
   final Map<String, String> _walkingEtaLabels = <String, String>{};
+  final TextEditingController _searchController = TextEditingController();
+  String _searchQuery = '';
 
   // Store category IDs
   // An empty set means "all categories" are selected.
   Set<String> _selectedCategories = <String>{};
+
+  // Null means all levels; otherwise only the selected level is shown.
+  String? _selectedActivityLevel;
 
   // this show all activities until the user chooses a status filter.
   _ActivityStatusFilter _statusFilter = _ActivityStatusFilter.upcoming;
@@ -51,13 +64,29 @@ class _ActivityListScreenState extends State<ActivityListScreen> {
   // Used to highlight the filter button when a filter is active.
   bool get _hasActiveFilters =>
       _selectedCategories.isNotEmpty ||
-      _statusFilter != _ActivityStatusFilter.upcoming;
+      _selectedActivityLevel != null ||
+      _searchQuery.isNotEmpty ||
+      _dateFilterIsActive;
 
   @override
   void initState() {
     super.initState();
-
+    _searchController.addListener(_handleSearchChanged);
     _activitiesFuture = _loadActivities();
+  }
+
+  void _handleSearchChanged() {
+    final query = _searchController.text.trim().toLowerCase();
+    if (query == _searchQuery) return;
+    setState(() => _searchQuery = query);
+  }
+
+  @override
+  void dispose() {
+    _searchController
+      ..removeListener(_handleSearchChanged)
+      ..dispose();
+    super.dispose();
   }
 
   Future<List<Activity>> _loadActivities() {
@@ -211,6 +240,10 @@ class _ActivityListScreenState extends State<ActivityListScreen> {
       context: context,
       isScrollControlled: true,
       showDragHandle: true,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
       builder: (sheetContext) => SafeArea(
         child: Padding(
           padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
@@ -546,13 +579,32 @@ class _ActivityListScreenState extends State<ActivityListScreen> {
         '${activity.longitude.toStringAsFixed(5)}';
   }
 
-  // Apply category and date filters locally to the fetched activities.
-  // Multiple selected categories work as OR; category and status work as AND.
+  // Apply level, category, and date filters in one local filtering pass.
+  // Multiple selected categories work as OR; the filter groups work as AND.
   List<Activity> _filterActivities(List<Activity> activities) {
     return activities.where((activity) {
+      if (_selectedActivityLevel != null &&
+          activity.activityLevel != _selectedActivityLevel) {
+        return false;
+      }
+
       if (_selectedCategories.isNotEmpty &&
           !_selectedCategories.contains(activity.category.id)) {
         return false;
+      }
+
+      if (_searchQuery.isNotEmpty) {
+        final searchable = <String?>[
+          activity.title,
+          activity.description,
+          activity.creatorUsername,
+          activity.activityLevel,
+          activity.category.label,
+          activity.building,
+          activity.floor,
+          activity.roomOrArea,
+        ].whereType<String>().join(' ').toLowerCase();
+        if (!searchable.contains(_searchQuery)) return false;
       }
 
       final expired = _isExpired(activity);
@@ -588,7 +640,10 @@ class _ActivityListScreenState extends State<ActivityListScreen> {
   void _clearFilters() {
     setState(() {
       _selectedCategories = <String>{};
+      _selectedActivityLevel = null;
       _statusFilter = _ActivityStatusFilter.upcoming;
+      _searchQuery = '';
+      _searchController.clear();
     });
     widget.onMapRefreshRequested?.call();
   }
@@ -600,12 +655,18 @@ class _ActivityListScreenState extends State<ActivityListScreen> {
 
     // Keep draft choices separate so Cancel does not change the list.
     final draftCategories = Set<String>.of(_selectedCategories);
+    var draftActivityLevel = _selectedActivityLevel;
     var draftStatus = _statusFilter;
+    var draftSearch = _searchController.text;
 
     await showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
       showDragHandle: true,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
       builder: (_) {
         return StatefulBuilder(
           builder: (sheetContext, setSheetState) {
@@ -626,7 +687,10 @@ class _ActivityListScreenState extends State<ActivityListScreen> {
                             child: Text(
                               'Filter activities',
                               style: Theme.of(sheetContext).textTheme.titleLarge
-                                  ?.copyWith(fontWeight: FontWeight.bold),
+                                  ?.copyWith(
+                                    color: _eventsText,
+                                    fontWeight: FontWeight.bold,
+                                  ),
                             ),
                           ),
                           TextButton(
@@ -634,7 +698,9 @@ class _ActivityListScreenState extends State<ActivityListScreen> {
                             onPressed: () {
                               setSheetState(() {
                                 draftCategories.clear();
-                                draftStatus = _ActivityStatusFilter.all;
+                                draftActivityLevel = null;
+                                draftStatus = _ActivityStatusFilter.upcoming;
+                                draftSearch = '';
                               });
                             },
                             child: const Text('Reset'),
@@ -644,24 +710,141 @@ class _ActivityListScreenState extends State<ActivityListScreen> {
                       const SizedBox(height: 20),
 
                       Text(
+                        'Activity level',
+                        style: Theme.of(sheetContext).textTheme.titleMedium
+                            ?.copyWith(
+                              color: _eventsText,
+                              fontWeight: FontWeight.w700,
+                            ),
+                      ),
+                      const SizedBox(height: 10),
+                      Wrap(
+                        spacing: 8,
+                        runSpacing: 8,
+                        children: [
+                          ChoiceChip(
+                            label: const Text('All'),
+                            selected: draftActivityLevel == null,
+                            onSelected: (_) =>
+                                setSheetState(() => draftActivityLevel = null),
+                            backgroundColor: _eventsSurfaceAlt,
+                            selectedColor: _eventsAccentSoft,
+                            side: BorderSide(
+                              color: draftActivityLevel == null
+                                  ? _eventsAccent
+                                  : _eventsBorder,
+                            ),
+                            labelStyle: TextStyle(
+                              color: draftActivityLevel == null
+                                  ? _eventsAccent
+                                  : _eventsTextMuted,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                          for (final level in ActivityLevel.all)
+                            ChoiceChip(
+                              label: Text(level.value),
+                              selected: draftActivityLevel == level.value,
+                              onSelected: (_) => setSheetState(
+                                () => draftActivityLevel =
+                                    draftActivityLevel == level.value
+                                    ? null
+                                    : level.value,
+                              ),
+                              backgroundColor: _eventsSurfaceAlt,
+                              selectedColor: _eventsAccentSoft,
+                              side: BorderSide(
+                                color: draftActivityLevel == level.value
+                                    ? _eventsAccent
+                                    : _eventsBorder,
+                              ),
+                              labelStyle: TextStyle(
+                                color: draftActivityLevel == level.value
+                                    ? _eventsAccent
+                                    : _eventsTextMuted,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                        ],
+                      ),
+
+                      const SizedBox(height: 20),
+                      Text(
                         'Categories',
-                        style: Theme.of(sheetContext).textTheme.titleMedium,
+                        style: Theme.of(sheetContext).textTheme.titleMedium
+                            ?.copyWith(
+                              color: _eventsText,
+                              fontWeight: FontWeight.w700,
+                            ),
                       ),
                       const SizedBox(height: 4),
-                      const Text('Select one or more, or leave all unchecked.'),
+                      const Text(
+                        'Select one or more categories.',
+                        style: TextStyle(color: _eventsTextMuted),
+                      ),
                       const SizedBox(height: 12),
 
                       Wrap(
                         spacing: 8,
                         runSpacing: 4,
                         children: [
+                          Tooltip(
+                            message: 'All categories',
+                            child: FilterChip(
+                              avatar: Icon(
+                                Icons.category_outlined,
+                                size: 18,
+                                color: draftCategories.isEmpty
+                                    ? _eventsAccent
+                                    : _eventsTextMuted,
+                              ),
+                              label: const Text('All'),
+                              selected: draftCategories.isEmpty,
+                              onSelected: (_) =>
+                                  setSheetState(draftCategories.clear),
+                              backgroundColor: _eventsSurfaceAlt,
+                              selectedColor: _eventsAccentSoft,
+                              checkmarkColor: _eventsAccent,
+                              side: BorderSide(
+                                color: draftCategories.isEmpty
+                                    ? _eventsAccent
+                                    : _eventsBorder,
+                              ),
+                              labelStyle: TextStyle(
+                                color: draftCategories.isEmpty
+                                    ? _eventsAccent
+                                    : _eventsTextMuted,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ),
                           for (final category in categories)
                             FilterChip(
                               // Here uses the category's icon and display label
                               // while saving its stable ID for filtering.
-                              avatar: Icon(category.icon, size: 18),
                               label: Text(category.label),
                               selected: draftCategories.contains(category.id),
+                              backgroundColor: _eventsSurfaceAlt,
+                              selectedColor: _eventsAccentSoft,
+                              checkmarkColor: _eventsAccent,
+                              side: BorderSide(
+                                color: draftCategories.contains(category.id)
+                                    ? _eventsAccent
+                                    : _eventsBorder,
+                              ),
+                              labelStyle: TextStyle(
+                                color: draftCategories.contains(category.id)
+                                    ? _eventsAccent
+                                    : _eventsTextMuted,
+                                fontWeight: FontWeight.w600,
+                              ),
+                              avatar: Icon(
+                                category.icon,
+                                size: 18,
+                                color: draftCategories.contains(category.id)
+                                    ? _eventsAccent
+                                    : _eventsTextMuted,
+                              ),
                               onSelected: (selected) {
                                 // Multiple categories may be chosen.
                                 setSheetState(() {
@@ -679,7 +862,11 @@ class _ActivityListScreenState extends State<ActivityListScreen> {
                       const SizedBox(height: 24),
                       Text(
                         'Event dates',
-                        style: Theme.of(sheetContext).textTheme.titleMedium,
+                        style: Theme.of(sheetContext).textTheme.titleMedium
+                            ?.copyWith(
+                              color: _eventsText,
+                              fontWeight: FontWeight.w700,
+                            ),
                       ),
                       const SizedBox(height: 12),
 
@@ -696,6 +883,19 @@ class _ActivityListScreenState extends State<ActivityListScreen> {
                                 draftStatus = _ActivityStatusFilter.all;
                               });
                             },
+                            backgroundColor: _eventsSurfaceAlt,
+                            selectedColor: _eventsAccentSoft,
+                            side: BorderSide(
+                              color: draftStatus == _ActivityStatusFilter.all
+                                  ? _eventsAccent
+                                  : _eventsBorder,
+                            ),
+                            labelStyle: TextStyle(
+                              color: draftStatus == _ActivityStatusFilter.all
+                                  ? _eventsAccent
+                                  : _eventsTextMuted,
+                              fontWeight: FontWeight.w600,
+                            ),
                           ),
                           for (final filter
                               in _ActivityStatusFilter.values.where(
@@ -713,6 +913,19 @@ class _ActivityListScreenState extends State<ActivityListScreen> {
                               selected: draftStatus == filter,
                               onSelected: (_) =>
                                   setSheetState(() => draftStatus = filter),
+                              backgroundColor: _eventsSurfaceAlt,
+                              selectedColor: _eventsAccentSoft,
+                              side: BorderSide(
+                                color: draftStatus == filter
+                                    ? _eventsAccent
+                                    : _eventsBorder,
+                              ),
+                              labelStyle: TextStyle(
+                                color: draftStatus == filter
+                                    ? _eventsAccent
+                                    : _eventsTextMuted,
+                                fontWeight: FontWeight.w600,
+                              ),
                             ),
                         ],
                       ),
@@ -723,6 +936,10 @@ class _ActivityListScreenState extends State<ActivityListScreen> {
                           Expanded(
                             child: OutlinedButton(
                               onPressed: () => Navigator.of(sheetContext).pop(),
+                              style: OutlinedButton.styleFrom(
+                                foregroundColor: _eventsText,
+                                side: const BorderSide(color: _eventsBorder),
+                              ),
                               child: const Text('Cancel'),
                             ),
                           ),
@@ -735,11 +952,20 @@ class _ActivityListScreenState extends State<ActivityListScreen> {
                                   _selectedCategories = Set<String>.of(
                                     draftCategories,
                                   );
+                                  _selectedActivityLevel = draftActivityLevel;
                                   _statusFilter = draftStatus;
+                                  _searchQuery = draftSearch
+                                      .trim()
+                                      .toLowerCase();
+                                  _searchController.text = draftSearch;
                                 });
                                 widget.onMapRefreshRequested?.call();
                                 Navigator.of(sheetContext).pop();
                               },
+                              style: FilledButton.styleFrom(
+                                backgroundColor: const Color(0xFF374151),
+                                foregroundColor: Colors.white,
+                              ),
                               child: const Text('Apply filters'),
                             ),
                           ),
@@ -758,176 +984,434 @@ class _ActivityListScreenState extends State<ActivityListScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Events'),
-        // The filter button is on the top right.
-        // AppBar manage the normal back button on the left automatically.
-        actions: [
-          IconButton(
-            tooltip: _hasActiveFilters
-                ? 'Activity filters active'
-                : 'Filter activities',
-            onPressed: _openFilters,
-            icon: Icon(
-              _hasActiveFilters ? Icons.filter_alt : Icons.filter_list,
-            ),
-          ),
-          const SizedBox(width: 8),
-        ],
+    final eventsTheme = Theme.of(context).copyWith(
+      colorScheme: Theme.of(context).colorScheme.copyWith(
+        primary: _eventsAccent,
+        secondary: _eventsAccent,
+        surface: Colors.white,
+        surfaceContainerHighest: _eventsSurfaceAlt,
+        outline: _eventsBorder,
+        onSurface: _eventsText,
       ),
-      // The body is a FutureBuilder that fetches activities from Supabase and displays them in a list.
+    );
+
+    return Theme(data: eventsTheme, child: _buildEventsScaffold(context));
+  }
+
+  Widget _buildEventsScaffold(BuildContext context) {
+    return Scaffold(
+      bottomNavigationBar: _buildBottomFilterControl(),
       body: FutureBuilder<List<Activity>>(
         future: _activitiesFuture,
-
         builder: (context, snapshot) {
-          // Only show the full-screen spinner on the first load. On later
-          // refreshes the previous data stays on screen.
           if (snapshot.connectionState == ConnectionState.waiting &&
               !snapshot.hasData) {
             return const Center(child: CircularProgressIndicator());
           }
 
           if (snapshot.hasError) {
-            return Center(
-              child: SingleChildScrollView(
-                padding: const EdgeInsets.all(24),
-
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-
-                  children: [
-                    Icon(
-                      Icons.error_outline,
-                      size: 64,
-                      color: Theme.of(context).colorScheme.error,
-                    ),
-
-                    const SizedBox(height: 16),
-
-                    Text(
-                      'Could not load activities',
-                      style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                        fontWeight: FontWeight.bold,
+            return _buildScrollablePage(
+              slivers: [
+                SliverFillRemaining(
+                  hasScrollBody: false,
+                  child: Center(
+                    child: Padding(
+                      padding: const EdgeInsets.all(24),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(
+                            Icons.error_outline,
+                            size: 56,
+                            color: Theme.of(context).colorScheme.error,
+                          ),
+                          const SizedBox(height: 16),
+                          Text(
+                            'Could not load activities',
+                            style: Theme.of(context).textTheme.titleLarge
+                                ?.copyWith(fontWeight: FontWeight.bold),
+                            textAlign: TextAlign.center,
+                          ),
+                          const SizedBox(height: 12),
+                          Text(
+                            snapshot.error.toString(),
+                            textAlign: TextAlign.center,
+                          ),
+                          const SizedBox(height: 20),
+                          FilledButton.icon(
+                            onPressed: _refreshActivities,
+                            icon: const Icon(Icons.refresh),
+                            label: const Text('Try again'),
+                          ),
+                        ],
                       ),
-                      textAlign: TextAlign.center,
                     ),
-
-                    const SizedBox(height: 12),
-
-                    Text(
-                      snapshot.error.toString(),
-                      textAlign: TextAlign.center,
-                    ),
-
-                    const SizedBox(height: 20),
-
-                    FilledButton.icon(
-                      onPressed: _refreshActivities,
-                      icon: const Icon(Icons.refresh),
-                      label: const Text('Try again'),
-                    ),
-                  ],
+                  ),
                 ),
-              ),
+              ],
             );
           }
 
           final activities = snapshot.data ?? const <Activity>[];
-
-          if (activities.isEmpty) {
-            return RefreshIndicator(
-              onRefresh: _refreshActivities,
-
-              child: ListView(
-                physics: const AlwaysScrollableScrollPhysics(),
-
-                padding: const EdgeInsets.all(24),
-
-                children: const [
-                  SizedBox(height: 120),
-
-                  Icon(Icons.event_busy_outlined, size: 72),
-
-                  SizedBox(height: 16),
-
-                  Text(
-                    'No activities',
-                    textAlign: TextAlign.center,
-
-                    style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
-                  ),
-
-                  SizedBox(height: 8),
-
-                  Text(
-                    'Current activities and activity history '
-                    'from the last 3 days will appear here.',
-                    textAlign: TextAlign.center,
-                  ),
-                ],
-              ),
-            );
-          }
-
-          // Filter the loaded activities before creating list cards.
           final filteredActivities = _filterActivities(activities);
-
-          // This displays a distinct empty state when activities exist but
-          // none match the user's current category/status choices.
-          if (filteredActivities.isEmpty) {
-            return RefreshIndicator(
-              onRefresh: _refreshActivities,
-              child: ListView(
-                physics: const AlwaysScrollableScrollPhysics(),
-                padding: const EdgeInsets.all(24),
-                children: [
-                  const SizedBox(height: 120),
-                  const Icon(Icons.filter_alt_off_outlined, size: 72),
-                  const SizedBox(height: 16),
-                  const Text(
-                    'No matching activities',
-                    textAlign: TextAlign.center,
-                    style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+          return _buildScrollablePage(
+            slivers: [
+              SliverToBoxAdapter(
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(20, 16, 20, 10),
+                  child: Row(
+                    children: [
+                      Text(
+                        '${filteredActivities.length} ${filteredActivities.length == 1 ? 'activity' : 'activities'}',
+                        style: const TextStyle(
+                          color: Color(0xFF111827),
+                          fontWeight: FontWeight.w800,
+                          fontSize: 16,
+                        ),
+                      ),
+                      if (_selectedActivityLevel != null) ...[
+                        const SizedBox(width: 8),
+                        Text(
+                          '·  $_selectedActivityLevel',
+                          style: const TextStyle(
+                            color: Color(0xFF6B7280),
+                            fontSize: 13,
+                          ),
+                        ),
+                      ],
+                    ],
                   ),
-                  const SizedBox(height: 8),
-                  const Text(
-                    'Try a different category or activity status.',
-                    textAlign: TextAlign.center,
-                  ),
-                  const SizedBox(height: 12),
-                  Center(
-                    child: TextButton(
-                      onPressed: _clearFilters,
-                      child: const Text('Clear filters'),
+                ),
+              ),
+              if (_selectedCategories.isNotEmpty || _dateFilterIsActive)
+                SliverToBoxAdapter(
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(20, 0, 20, 12),
+                    child: Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: [
+                        for (final category in ActivityCategory.all.where(
+                          (category) =>
+                              _selectedCategories.contains(category.id),
+                        ))
+                          _buildRemovableFilterChip(
+                            category.label,
+                            onDeleted: () => _removeCategoryFilter(category.id),
+                          ),
+                        if (_dateFilterIsActive)
+                          _buildRemovableFilterChip(
+                            _dateFilterLabel(_statusFilter),
+                            onDeleted: () => setState(
+                              () => _statusFilter =
+                                  _ActivityStatusFilter.upcoming,
+                            ),
+                          ),
+                      ],
                     ),
                   ),
-                ],
-              ),
-            );
-          }
-
-          return RefreshIndicator(
-            onRefresh: _refreshActivities,
-
-            child: ListView.separated(
-              physics: const AlwaysScrollableScrollPhysics(),
-
-              padding: const EdgeInsets.all(16),
-
-              // The list now uses only matching activities.
-              itemCount: filteredActivities.length,
-
-              separatorBuilder: (_, _) => const SizedBox(height: 12),
-
-              itemBuilder: (context, index) {
-                final activity = filteredActivities[index];
-
-                return _buildActivityCard(activity);
-              },
-            ),
+                ),
+              if (filteredActivities.isEmpty)
+                SliverFillRemaining(
+                  hasScrollBody: false,
+                  child: _buildEmptyState(activities.isEmpty),
+                )
+              else
+                SliverPadding(
+                  padding: const EdgeInsets.fromLTRB(16, 4, 16, 24),
+                  sliver: SliverList(
+                    delegate: SliverChildBuilderDelegate(
+                      (context, index) => Padding(
+                        padding: const EdgeInsets.only(bottom: 12),
+                        child: _buildActivityCard(filteredActivities[index]),
+                      ),
+                      childCount: filteredActivities.length,
+                    ),
+                  ),
+                ),
+            ],
           );
         },
+      ),
+    );
+  }
+
+  Widget _buildScrollablePage({required List<Widget> slivers}) {
+    return RefreshIndicator(
+      onRefresh: _refreshActivities,
+      child: CustomScrollView(
+        physics: const AlwaysScrollableScrollPhysics(),
+        slivers: slivers,
+      ),
+    );
+  }
+
+  Widget _buildBottomFilterControl() {
+    return SafeArea(
+      top: false,
+      bottom: false,
+      child: Container(
+        margin: const EdgeInsets.fromLTRB(16, 8, 16, 12),
+        padding: const EdgeInsets.fromLTRB(12, 12, 12, 10),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(18),
+          border: Border.all(color: _eventsBorder),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.07),
+              blurRadius: 14,
+              offset: const Offset(0, 3),
+            ),
+          ],
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Row(
+              children: [
+                Expanded(
+                  child: TextField(
+                    controller: _searchController,
+                    textInputAction: TextInputAction.search,
+                    decoration: InputDecoration(
+                      hintText: 'Search activities...',
+                      prefixIcon: const Icon(Icons.search),
+                      suffixIcon: _searchQuery.isEmpty
+                          ? null
+                          : IconButton(
+                              tooltip: 'Clear search',
+                              onPressed: _searchController.clear,
+                              icon: const Icon(Icons.close),
+                            ),
+                      filled: true,
+                      fillColor: const Color(0xFFF6F7F9),
+                      contentPadding: const EdgeInsets.symmetric(vertical: 10),
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(14),
+                        borderSide: const BorderSide(color: _eventsBorder),
+                      ),
+                      enabledBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(14),
+                        borderSide: const BorderSide(color: _eventsBorder),
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Tooltip(
+                  message: 'Filters',
+                  child: OutlinedButton(
+                    onPressed: _openFilters,
+                    style: OutlinedButton.styleFrom(
+                      minimumSize: const Size(46, 48),
+                      maximumSize: const Size(46, 48),
+                      padding: EdgeInsets.zero,
+                      foregroundColor: _hasActiveFilters
+                          ? _eventsAccent
+                          : _eventsText,
+                      backgroundColor: _hasActiveFilters
+                          ? _eventsAccentSoft
+                          : const Color(0xFFF6F7F9),
+                      side: BorderSide(
+                        color: _hasActiveFilters
+                            ? _eventsAccent
+                            : _eventsBorder,
+                      ),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(13),
+                      ),
+                    ),
+                    child: const Icon(Icons.tune, size: 19),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 4),
+            SizedBox(
+              height: 52,
+              child: Row(
+                children: [
+                  Expanded(
+                    child: _buildLevelTab(
+                      null,
+                      label: 'All',
+                      icon: Icons.explore_outlined,
+                    ),
+                  ),
+                  for (final level in ActivityLevel.all)
+                    Expanded(
+                      child: _buildLevelTab(
+                        level.value,
+                        label: _shortActivityLevelLabel(level.value),
+                        icon: _activityLevelIcon(level.value),
+                      ),
+                    ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  String _shortActivityLevelLabel(String value) => switch (value) {
+    'Campus-Wide' => 'Campus',
+    'Organization' => 'Org',
+    'Community' => 'Community',
+    'Personal' => 'Personal',
+    _ => value,
+  };
+
+  IconData _activityLevelIcon(String value) => switch (value) {
+    'Campus-Wide' => Icons.apartment_outlined,
+    'Organization' => Icons.groups_2_outlined,
+    'Community' => Icons.diversity_3_outlined,
+    'Personal' => Icons.person_outline,
+    _ => Icons.explore_outlined,
+  };
+
+  Widget _buildLevelTab(
+    String? value, {
+    required String label,
+    required IconData icon,
+  }) {
+    final selected = _selectedActivityLevel == value;
+
+    return Semantics(
+      label: value ?? 'All activity levels',
+      button: true,
+      selected: selected,
+      child: Tooltip(
+        message: value ?? 'All activity levels',
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 2),
+          child: Material(
+            color: selected ? _eventsAccentSoft : Colors.transparent,
+            borderRadius: BorderRadius.circular(12),
+            child: InkWell(
+              onTap: () {
+                setState(() => _selectedActivityLevel = value);
+                widget.onMapRefreshRequested?.call();
+              },
+              borderRadius: BorderRadius.circular(12),
+              child: Container(
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(
+                    color: selected ? _eventsAccent : Colors.transparent,
+                  ),
+                ),
+                padding: const EdgeInsets.symmetric(vertical: 4),
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(
+                      icon,
+                      size: 19,
+                      color: selected ? _eventsAccent : _eventsTextMuted,
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      label,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        color: selected ? _eventsAccent : _eventsTextMuted,
+                        fontWeight: selected
+                            ? FontWeight.w700
+                            : FontWeight.w500,
+                        fontSize: 9.5,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildRemovableFilterChip(
+    String label, {
+    required VoidCallback onDeleted,
+  }) {
+    return InputChip(
+      label: Text(label),
+      onDeleted: onDeleted,
+      deleteIcon: const Icon(Icons.close, size: 16),
+      backgroundColor: _eventsSurfaceAlt,
+      side: const BorderSide(color: _eventsBorder),
+      labelStyle: const TextStyle(
+        color: Color(0xFF374151),
+        fontSize: 12,
+        fontWeight: FontWeight.w600,
+      ),
+      visualDensity: VisualDensity.compact,
+    );
+  }
+
+  bool get _dateFilterIsActive =>
+      _statusFilter != _ActivityStatusFilter.upcoming &&
+      _statusFilter != _ActivityStatusFilter.all;
+
+  String _dateFilterLabel(_ActivityStatusFilter filter) => switch (filter) {
+    _ActivityStatusFilter.upcoming => 'Upcoming',
+    _ActivityStatusFilter.today => 'Today',
+    _ActivityStatusFilter.tomorrow => 'Tomorrow',
+    _ActivityStatusFilter.thisWeek => 'This week',
+    _ActivityStatusFilter.past => 'Past events',
+    _ActivityStatusFilter.all => 'All dates',
+  };
+
+  void _removeCategoryFilter(String categoryId) {
+    setState(() => _selectedCategories.remove(categoryId));
+    widget.onMapRefreshRequested?.call();
+  }
+
+  Widget _buildEmptyState(bool noActivitiesLoaded) {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(28, 24, 28, 56),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              noActivitiesLoaded
+                  ? Icons.event_busy_outlined
+                  : Icons.search_off_rounded,
+              size: 50,
+              color: const Color(0xFF9CA3AF),
+            ),
+            const SizedBox(height: 14),
+            Text(
+              noActivitiesLoaded ? 'No activities yet' : 'No activities found',
+              style: const TextStyle(
+                color: Color(0xFF111827),
+                fontWeight: FontWeight.w800,
+                fontSize: 18,
+              ),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 6),
+            const Text(
+              'Try changing your search or filters.',
+              style: TextStyle(color: Color(0xFF6B7280)),
+              textAlign: TextAlign.center,
+            ),
+            if (_hasActiveFilters) ...[
+              const SizedBox(height: 14),
+              TextButton(
+                onPressed: _clearFilters,
+                child: const Text('Clear all filters'),
+              ),
+            ],
+          ],
+        ),
       ),
     );
   }
@@ -958,231 +1442,202 @@ class _ActivityListScreenState extends State<ActivityListScreen> {
 
     return Card(
       color: cardColor,
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: () => showActivityDetailsSheet(context, activity),
+        child: Padding(
+          padding: const EdgeInsets.all(16),
 
-      child: Padding(
-        padding: const EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
 
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
 
-          children: [
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  CircleAvatar(
+                    backgroundColor: expired
+                        ? Colors.grey
+                        : activity.category.color,
 
-              children: [
-                CircleAvatar(
-                  backgroundColor: expired
-                      ? Colors.grey
-                      : activity.category.color,
+                    child: Icon(activity.category.icon, color: Colors.white),
+                  ),
 
-                  child: Icon(activity.category.icon, color: Colors.white),
-                ),
+                  const SizedBox(width: 12),
 
-                const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
 
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-
-                    children: [
-                      Text(
-                        activity.title,
-
-                        style: Theme.of(context).textTheme.titleMedium
-                            ?.copyWith(
-                              fontWeight: FontWeight.bold,
-                              color: textColor,
-                            ),
-                      ),
-
-                      const SizedBox(height: 4),
-
-                      Text(
-                        '${activity.activityLevel} • ${activity.category.label}',
-
-                        style: TextStyle(color: textColor),
-                      ),
-
-                      if (activity.creatorUsername != null &&
-                          activity.creatorUsername!.trim().isNotEmpty) ...[
-                        const SizedBox(height: 2),
+                      children: [
                         Text(
-                          'by ${activity.creatorUsername}',
-                          style: TextStyle(
-                            color: textColor.withValues(alpha: 0.8),
-                          ),
-                        ),
-                      ],
+                          activity.title,
 
-                      if (expired) ...[
-                        const SizedBox(height: 6),
-
-                        Row(
-                          children: [
-                            Icon(
-                              Icons.auto_awesome,
-                              size: 16,
-                              color: textColor,
-                            ),
-
-                            const SizedBox(width: 6),
-
-                            Text(
-                              _endedLabel(activity),
-
-                              style: TextStyle(
+                          style: Theme.of(context).textTheme.titleMedium
+                              ?.copyWith(
+                                fontWeight: FontWeight.bold,
                                 color: textColor,
-                                fontWeight: FontWeight.w600,
                               ),
+                        ),
+
+                        const SizedBox(height: 4),
+
+                        Text(
+                          '${activity.activityLevel} • ${activity.category.label}',
+
+                          style: TextStyle(color: textColor),
+                        ),
+
+                        if (activity.creatorUsername != null &&
+                            activity.creatorUsername!.trim().isNotEmpty) ...[
+                          const SizedBox(height: 2),
+                          Text(
+                            'by ${activity.creatorUsername}',
+                            style: TextStyle(
+                              color: textColor.withValues(alpha: 0.8),
                             ),
-                          ],
-                        ),
+                          ),
+                        ],
+
+                        if (expired) ...[
+                          const SizedBox(height: 6),
+
+                          Row(
+                            children: [
+                              Icon(
+                                Icons.auto_awesome,
+                                size: 16,
+                                color: textColor,
+                              ),
+
+                              const SizedBox(width: 6),
+
+                              Text(
+                                _endedLabel(activity),
+
+                                style: TextStyle(
+                                  color: textColor,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ],
                       ],
-                    ],
-                  ),
-                ),
-              ],
-            ),
-
-            if (activity.description != null &&
-                activity.description!.trim().isNotEmpty) ...[
-              const SizedBox(height: 12),
-
-              Text(
-                activity.description!,
-                maxLines: 3,
-                overflow: TextOverflow.ellipsis,
-
-                style: TextStyle(color: textColor),
-              ),
-            ],
-
-            const SizedBox(height: 16),
-
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-
-              children: [
-                Icon(Icons.schedule_outlined, size: 20, color: textColor),
-
-                const SizedBox(width: 8),
-
-                Expanded(
-                  child: Text(
-                    _formatTimeRange(activity),
-
-                    style: TextStyle(color: textColor),
-                  ),
-                ),
-              ],
-            ),
-
-            const SizedBox(height: 8),
-
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-
-              children: [
-                Icon(Icons.location_on_outlined, size: 20, color: textColor),
-
-                const SizedBox(width: 8),
-
-                Expanded(
-                  child: Text(
-                    _formatLocation(activity),
-
-                    style: TextStyle(color: textColor),
-                  ),
-                ),
-              ],
-            ),
-
-            const SizedBox(height: 8),
-
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-
-              children: [
-                Icon(Icons.people_outline, size: 20, color: textColor),
-
-                const SizedBox(width: 8),
-
-                Expanded(
-                  child: InkWell(
-                    onTap: () => _showParticipants(activity),
-                    borderRadius: BorderRadius.circular(4),
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(vertical: 2),
-                      child: Text(
-                        _formatParticipants(activity),
-                        style: TextStyle(
-                          color: textColor,
-                          decoration: TextDecoration.underline,
-                        ),
-                      ),
                     ),
                   ),
+                ],
+              ),
+
+              if (activity.description != null &&
+                  activity.description!.trim().isNotEmpty) ...[
+                const SizedBox(height: 12),
+
+                Text(
+                  activity.description!,
+                  maxLines: 3,
+                  overflow: TextOverflow.ellipsis,
+
+                  style: TextStyle(color: textColor),
                 ),
               ],
-            ),
 
-            if (!expired) ...[
               const SizedBox(height: 16),
 
-              Align(
-                alignment: Alignment.centerRight,
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
 
-                child: Wrap(
-                  alignment: WrapAlignment.end,
-                  spacing: 8,
-                  runSpacing: 8,
-                  children: [
-                    // 1) Join (icon only). Uses existing join/leave logic.
-                    if (joinButton != null) joinButton,
+                children: [
+                  Icon(Icons.schedule_outlined, size: 20, color: textColor),
 
-                    // 2) Walk (icon + ETA text only, no "Walk" label)
-                    TextButton.icon(
-                      onPressed: () async {
-                        await _ensureWalkingEta(activity);
-                        if (!mounted) return;
-                        await _openWalkingDirections(activity);
-                      },
-                      style: TextButton.styleFrom(
-                        visualDensity: VisualDensity.compact,
-                        padding: const EdgeInsets.symmetric(horizontal: 8),
-                      ),
-                      icon: _walkingEtaLoadingIds.contains(activity.id)
-                          ? const SizedBox(
-                              width: 18,
-                              height: 18,
-                              child: CircularProgressIndicator(strokeWidth: 2),
-                            )
-                          : const Icon(Icons.directions_walk, size: 20),
-                      label: Text(
-                        _walkingEtaLabels[activity.id] ?? '',
-                        style: const TextStyle(fontWeight: FontWeight.w600),
+                  const SizedBox(width: 8),
+
+                  Expanded(
+                    child: Text(
+                      _formatTimeRange(activity),
+
+                      style: TextStyle(color: textColor),
+                    ),
+                  ),
+                ],
+              ),
+
+              const SizedBox(height: 8),
+
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+
+                children: [
+                  Icon(Icons.location_on_outlined, size: 20, color: textColor),
+
+                  const SizedBox(width: 8),
+
+                  Expanded(
+                    child: Text(
+                      _formatLocation(activity),
+
+                      style: TextStyle(color: textColor),
+                    ),
+                  ),
+                ],
+              ),
+
+              const SizedBox(height: 8),
+
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+
+                children: [
+                  Icon(Icons.people_outline, size: 20, color: textColor),
+
+                  const SizedBox(width: 8),
+
+                  Expanded(
+                    child: InkWell(
+                      onTap: () => _showParticipants(activity),
+                      borderRadius: BorderRadius.circular(4),
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 2),
+                        child: Text(
+                          _formatParticipants(activity),
+                          style: TextStyle(
+                            color: textColor,
+                            decoration: TextDecoration.underline,
+                          ),
+                        ),
                       ),
                     ),
+                  ),
+                ],
+              ),
 
-                    // 3) View on Map (icon only)
-                    IconButton(
-                      tooltip: 'View on map',
-                      visualDensity: VisualDensity.compact,
-                      iconSize: 20,
-                      onPressed: () => widget.onViewOnMap(activity),
-                      icon: const Icon(Icons.map_outlined),
-                    ),
+              if (!expired) ...[
+                const SizedBox(height: 16),
 
-                    // Join, Leave or Full. Hidden on your own activities.
-                    if (active && (widget.isAdmin || activity.isOwner))
-                      IconButton(
-                        tooltip: 'Delete activity',
-                        visualDensity: VisualDensity.compact,
-                        iconSize: 20,
-                        onPressed: _deletingActivityIds.contains(activity.id)
-                            ? null
-                            : () => _confirmAdminDelete(activity),
-                        icon: _deletingActivityIds.contains(activity.id)
+                Align(
+                  alignment: Alignment.centerRight,
+
+                  child: Wrap(
+                    alignment: WrapAlignment.end,
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: [
+                      // 1) Join (icon only). Uses existing join/leave logic.
+                      if (joinButton != null) joinButton,
+
+                      // 2) Walk (icon + ETA text only, no "Walk" label)
+                      TextButton.icon(
+                        onPressed: () async {
+                          await _ensureWalkingEta(activity);
+                          if (!mounted) return;
+                          await _openWalkingDirections(activity);
+                        },
+                        style: TextButton.styleFrom(
+                          visualDensity: VisualDensity.compact,
+                          padding: const EdgeInsets.symmetric(horizontal: 8),
+                        ),
+                        icon: _walkingEtaLoadingIds.contains(activity.id)
                             ? const SizedBox(
                                 width: 18,
                                 height: 18,
@@ -1190,14 +1645,48 @@ class _ActivityListScreenState extends State<ActivityListScreen> {
                                   strokeWidth: 2,
                                 ),
                               )
-                            : const Icon(Icons.delete_outline),
-                        color: Colors.red,
+                            : const Icon(Icons.directions_walk, size: 20),
+                        label: Text(
+                          _walkingEtaLabels[activity.id] ?? '',
+                          style: const TextStyle(fontWeight: FontWeight.w600),
+                        ),
                       ),
-                  ],
+
+                      // 3) View on Map (icon only)
+                      IconButton(
+                        tooltip: 'View on map',
+                        visualDensity: VisualDensity.compact,
+                        iconSize: 20,
+                        onPressed: () => widget.onViewOnMap(activity),
+                        icon: const Icon(Icons.map_outlined),
+                      ),
+
+                      // Join, Leave or Full. Hidden on your own activities.
+                      if (active && (widget.isAdmin || activity.isOwner))
+                        IconButton(
+                          tooltip: 'Delete activity',
+                          visualDensity: VisualDensity.compact,
+                          iconSize: 20,
+                          onPressed: _deletingActivityIds.contains(activity.id)
+                              ? null
+                              : () => _confirmAdminDelete(activity),
+                          icon: _deletingActivityIds.contains(activity.id)
+                              ? const SizedBox(
+                                  width: 18,
+                                  height: 18,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                  ),
+                                )
+                              : const Icon(Icons.delete_outline),
+                          color: Colors.red,
+                        ),
+                    ],
+                  ),
                 ),
-              ),
+              ],
             ],
-          ],
+          ),
         ),
       ),
     );

@@ -1,8 +1,10 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:math' as math;
 import 'dart:ui' as ui;
 
 import 'package:campus_app/data/campus_boundary.dart';
+import 'package:campus_app/data/campus_buildings.dart';
 import 'package:campus_app/data/campus_locations.dart';
 import 'package:campus_app/models/activity.dart';
 import 'package:campus_app/screens/activities/create_activity_screen.dart';
@@ -193,6 +195,9 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
   static const String _skinSourceId = 'bonfire-campus-map-skin';
   static const String _skinLayerId = 'bonfire-campus-map-skin-layer';
 
+  // Legacy permanent landmark/building pins are replaced by the polygon layer.
+  static const bool _showLegacyPermanentLocationPins = false;
+
   // ============================================================
   // UTRGV CAMPUS POLYGON OVERLAY
   // ============================================================
@@ -204,6 +209,11 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
       'bonfire-utrgv-edinburg-campus-boundary-outline-layer';
   static const String _legacyCampusBoundaryLayerId =
       'bonfire-utrgv-edinburg-campus-boundary-layer';
+  static const String _campusBuildingsSourceId =
+      'bonfire-utrgv-edinburg-campus-buildings';
+  static const String _campusBuildingsFillLayerId =
+      'bonfire-utrgv-edinburg-campus-buildings-fill-layer';
+  static const double _buildingMarkerIconSize = 0.8;
 
   static final Point utrgvEdinburgCampus = Point(
     coordinates: Position(-98.174165, 26.304551),
@@ -224,6 +234,8 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
   MapboxMap? _mapboxMap;
 
   PointAnnotationManager? _permanentLocationAnnotationManager;
+  PointAnnotationManager? _buildingMarkerAnnotationManager;
+  final Map<String, _BuildingMarkerTarget> _buildingMarkerTargets = {};
 
   CircleAnnotationManager? _activityAnnotationManager;
 
@@ -240,6 +252,8 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
   bool _isLoadingActivities = false;
 
   String? _activityLoadError;
+
+  List<Activity> _latestActivities = const [];
 
   Activity? get _recommendedActivity {
     final now = DateTime.now();
@@ -353,6 +367,8 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
     );
     await _addCampusMapSkin();
     await _addUtrgvEdinburgCampusBoundaryOverlay();
+    await _addUtrgvEdinburgCampusBuildingOverlay();
+    await _refreshCampusBuildingMarkers();
   }
 
   Future<void> _addCampusMapSkin() async {
@@ -478,13 +494,15 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
 
     // Ensure we never show polygon outlines for the campus overlay.
     // (Also removes a legacy single-layer implementation that included an outline.)
-    final legacyLayerExists =
-        await style.styleLayerExists(_legacyCampusBoundaryLayerId);
+    final legacyLayerExists = await style.styleLayerExists(
+      _legacyCampusBoundaryLayerId,
+    );
     if (legacyLayerExists) {
       await style.removeStyleLayer(_legacyCampusBoundaryLayerId);
     }
-    final outlineLayerExists =
-        await style.styleLayerExists(_campusBoundaryOutlineLayerId);
+    final outlineLayerExists = await style.styleLayerExists(
+      _campusBoundaryOutlineLayerId,
+    );
     if (outlineLayerExists) {
       await style.removeStyleLayer(_campusBoundaryOutlineLayerId);
     }
@@ -503,8 +521,9 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
       await source.updateGeoJSON(utrgvEdinburgCampusBoundaryGeoJson);
     }
 
-    final fillLayerExists =
-        await style.styleLayerExists(_campusBoundaryFillLayerId);
+    final fillLayerExists = await style.styleLayerExists(
+      _campusBoundaryFillLayerId,
+    );
     if (!fillLayerExists) {
       await style.addLayer(
         FillLayer(
@@ -513,17 +532,288 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
           // Keep it above the basemap details; polygons are still translucent.
           slot: 'top',
           // Style is driven from each GeoJSON feature's properties.
-          fillColorExpression: const ['to-color', ['get', 'fill']],
+          fillColorExpression: const [
+            'to-color',
+            ['get', 'fill'],
+          ],
           fillOpacityExpression: const [
             // Cap per-feature opacity so the overlay stays subtle and the
             // basemap remains clearly visible.
             'min',
-            ['coalesce', ['get', 'fill-opacity'], 0.55],
+            [
+              'coalesce',
+              ['get', 'fill-opacity'],
+              0.55,
+            ],
             0.15,
           ],
         ),
       );
     }
+  }
+
+  Future<void> _addUtrgvEdinburgCampusBuildingOverlay() async {
+    final map = _mapboxMap;
+    if (map == null) return;
+
+    final style = map.style;
+    final sourceExists = await style.styleSourceExists(
+      _campusBuildingsSourceId,
+    );
+    if (!sourceExists) {
+      await style.addSource(
+        GeoJsonSource(
+          id: _campusBuildingsSourceId,
+          data: utrgvEdinburgCampusBuildingsGeoJson,
+        ),
+      );
+    } else {
+      final source =
+          await style.getSource(_campusBuildingsSourceId) as GeoJsonSource;
+      await source.updateGeoJSON(utrgvEdinburgCampusBuildingsGeoJson);
+    }
+
+    final fillLayerExists = await style.styleLayerExists(
+      _campusBuildingsFillLayerId,
+    );
+    if (!fillLayerExists) {
+      await style.addLayer(
+        FillLayer(
+          id: _campusBuildingsFillLayerId,
+          sourceId: _campusBuildingsSourceId,
+          // Add after the low-opacity campus overlay so building colors remain
+          // visible. Map annotations continue to render above style layers.
+          slot: 'top',
+          fillColorExpression: const [
+            'case',
+            ['has', 'fill'],
+            [
+              'to-color',
+              ['get', 'fill'],
+            ],
+            ['to-color', '#312E81'],
+          ],
+          fillOpacityExpression: const [
+            'coalesce',
+            ['get', 'fill-opacity'],
+            1.0,
+          ],
+        ),
+      );
+    }
+  }
+
+  Future<void> _refreshCampusBuildingMarkers() async {
+    final map = _mapboxMap;
+    if (map == null) return;
+
+    var manager = _buildingMarkerAnnotationManager;
+    if (manager == null) {
+      manager = await map.annotations.createPointAnnotationManager();
+      _buildingMarkerAnnotationManager = manager;
+      await manager.setIconAllowOverlap(true);
+      manager.tapEvents(
+        onTap: (annotation) {
+          final target = _buildingMarkerTargets[annotation.id];
+          if (target != null) {
+            _showBuildingDetails(target.location, target.ring);
+          }
+        },
+      );
+    } else {
+      await manager.deleteAll();
+    }
+
+    _buildingMarkerTargets.clear();
+    final decoded = jsonDecode(utrgvEdinburgCampusBuildingsGeoJson);
+    if (decoded is! Map) return;
+    final rawFeatures = decoded['features'];
+    if (rawFeatures is! List) return;
+
+    final markerImage = await _createBuildingDiscoveryMarkerImage();
+    final options = <PointAnnotationOptions>[];
+    final targets = <_BuildingMarkerTarget>[];
+
+    for (final rawFeature in rawFeatures) {
+      if (rawFeature is! Map) continue;
+      final feature = rawFeature.cast<String?, Object?>();
+      final ring = _firstRingFromGeoJsonFeature(feature);
+      if (ring == null) continue;
+
+      final anchor = _sparkleAnchorForRing(ring);
+      final location = _buildingLocationFromFeature(feature, anchor);
+      options.add(
+        PointAnnotationOptions(
+          geometry: Point(coordinates: anchor),
+          image: markerImage,
+          iconAnchor: IconAnchor.CENTER,
+          iconSize: _buildingMarkerIconSize,
+          iconOffset: const [0, -4],
+          symbolSortKey: 1000,
+        ),
+      );
+      targets.add(_BuildingMarkerTarget(location: location, ring: ring));
+    }
+
+    if (options.isEmpty) return;
+    final annotations = await manager.createMulti(options);
+    for (var index = 0; index < annotations.length; index++) {
+      final annotationId = annotations[index]?.id;
+      if (annotationId != null && index < targets.length) {
+        _buildingMarkerTargets[annotationId] = targets[index];
+      }
+    }
+  }
+
+  Future<Uint8List> _createBuildingDiscoveryMarkerImage() async {
+    const imageWidth = 72.0;
+    const imageHeight = 96.0;
+    final recorder = ui.PictureRecorder();
+    final canvas = Canvas(recorder);
+    final beaconPath = Path()
+      ..moveTo(36, 4)
+      ..cubicTo(48, 4, 55, 12, 55, 22)
+      ..cubicTo(55, 31, 49, 37, 41, 39)
+      ..lineTo(44, 47)
+      ..cubicTo(47, 50, 53, 53, 57, 57)
+      ..cubicTo(64, 64, 67, 72, 66, 79)
+      ..lineTo(64, 82)
+      ..cubicTo(69, 83, 71, 86, 71, 89)
+      ..cubicTo(71, 93, 68, 94, 64, 94)
+      ..lineTo(8, 94)
+      ..cubicTo(4, 94, 1, 93, 1, 89)
+      ..cubicTo(1, 86, 3, 83, 8, 82)
+      ..lineTo(6, 79)
+      ..cubicTo(5, 72, 8, 64, 15, 57)
+      ..cubicTo(19, 53, 25, 50, 28, 47)
+      ..lineTo(31, 39)
+      ..cubicTo(23, 37, 17, 31, 17, 22)
+      ..cubicTo(17, 12, 24, 4, 36, 4)
+      ..close();
+
+    canvas.drawShadow(beaconPath, const Color(0x990B1220), 4, true);
+    canvas.drawPath(
+      beaconPath,
+      Paint()
+        ..color = Colors.white
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 4
+        ..strokeJoin = StrokeJoin.round,
+    );
+    canvas.drawPath(
+      beaconPath,
+      Paint()
+        ..color = const Color(0xFF17243A)
+        ..style = PaintingStyle.fill,
+    );
+
+    final image = await recorder.endRecording().toImage(
+      imageWidth.toInt(),
+      imageHeight.toInt(),
+    );
+    final data = await image.toByteData(format: ui.ImageByteFormat.png);
+    image.dispose();
+    if (data == null) {
+      throw StateError('Unable to render campus building discovery marker.');
+    }
+    return data.buffer.asUint8List();
+  }
+
+  Position _sparkleAnchorForRing(List<List<double>> ring) {
+    final minLat = ring.map((point) => point[1]).reduce(math.min).toDouble();
+    final maxLat = ring.map((point) => point[1]).reduce(math.max).toDouble();
+    final centerLatitude = (minLat + maxLat) / 2;
+    Position? bestInteriorPoint;
+    var widestInteriorSlice = 0.0;
+    var bestCenterDistance = double.infinity;
+
+    // Find the widest horizontal interior slice for a stable anchor, including
+    // for concave building outlines whose geometric center may be outside.
+    for (var step = 1; step < 20; step++) {
+      final latitude = minLat + (maxLat - minLat) * step / 20;
+      final intersections = <double>[];
+      for (
+        var index = 0, previous = ring.length - 1;
+        index < ring.length;
+        previous = index++
+      ) {
+        final currentPoint = ring[index];
+        final previousPoint = ring[previous];
+        if ((currentPoint[1] > latitude) == (previousPoint[1] > latitude)) {
+          continue;
+        }
+        final longitude =
+            previousPoint[0] +
+            (latitude - previousPoint[1]) *
+                (currentPoint[0] - previousPoint[0]) /
+                (currentPoint[1] - previousPoint[1]);
+        intersections.add(longitude);
+      }
+      intersections.sort();
+      for (var index = 0; index + 1 < intersections.length; index += 2) {
+        final sliceWidth = intersections[index + 1] - intersections[index];
+        final longitude = (intersections[index] + intersections[index + 1]) / 2;
+        if (!_pointInPolygon(lon: longitude, lat: latitude, ring: ring)) {
+          continue;
+        }
+        final centerDistance = (latitude - centerLatitude).abs();
+        if (sliceWidth < widestInteriorSlice - 1e-15 ||
+            ((sliceWidth - widestInteriorSlice).abs() <= 1e-15 &&
+                centerDistance >= bestCenterDistance)) {
+          continue;
+        }
+        widestInteriorSlice = sliceWidth;
+        bestCenterDistance = centerDistance;
+        bestInteriorPoint = Position(longitude, latitude);
+      }
+    }
+
+    var anchor =
+        bestInteriorPoint ??
+        Position(
+          ring.map((point) => point[0]).reduce((a, b) => a + b) / ring.length,
+          ring.map((point) => point[1]).reduce((a, b) => a + b) / ring.length,
+        );
+
+    final lifted = Position(anchor.lng, anchor.lat + (maxLat - minLat) * 0.07);
+    if (_pointInPolygon(
+      lon: lifted.lng.toDouble(),
+      lat: lifted.lat.toDouble(),
+      ring: ring,
+    )) {
+      anchor = lifted;
+    }
+    return anchor;
+  }
+
+  LocationData _buildingLocationFromFeature(
+    Map<String?, Object?> feature,
+    Position coordinates,
+  ) {
+    final rawProperties = feature['properties'];
+    final properties = rawProperties is Map
+        ? rawProperties.cast<String?, Object?>()
+        : const <String?, Object?>{};
+    final sourceName = properties['source_name'] as String?;
+    final name = properties['name'] as String?;
+    final shortName = properties['short_name'] as String?;
+    final title = sourceName?.trim().isNotEmpty == true
+        ? sourceName!.trim()
+        : name?.trim().isNotEmpty == true
+        ? name!.trim()
+        : shortName?.trim().isNotEmpty == true
+        ? shortName!.trim()
+        : 'Building';
+    final description =
+        shortName?.trim().isNotEmpty == true && shortName!.trim() != title
+        ? shortName.trim()
+        : '';
+
+    return LocationData(
+      title: title,
+      description: description,
+      coordinates: coordinates,
+    );
   }
 
   String _markerAssetForActivityCount(int count) {
@@ -553,6 +843,10 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
 
   //Manages the setup of permanent markers, adds tap listeners, creates markers
   Future<void> _setUpPermanentLocationMarkers() async {
+    if (!_showLegacyPermanentLocationPins) {
+      return;
+    }
+
     if (_mapboxMap == null) {
       return;
     }
@@ -685,10 +979,11 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
       );
 
       final allActivities = [...activities];
+      _latestActivities = allActivities;
 
       final groupedActivities = MapScreen.groupActivitiesByPermanentMarker(
         activities: allActivities,
-        permanentLocations: customLocations,
+        permanentLocations: const [],
       );
 
       final groupedActivityIds = groupedActivities.values
@@ -825,6 +1120,91 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
         bearing: 0.0,
       );
     });
+  }
+
+  Future<bool> _handleBuildingTap(MapContentGestureContext context) async {
+    final map = _mapboxMap;
+    if (map == null) return false;
+
+    final results = await map.queryRenderedFeatures(
+      RenderedQueryGeometry.fromScreenCoordinate(context.touchPosition),
+      RenderedQueryOptions(layerIds: [_campusBuildingsFillLayerId]),
+    );
+
+    for (final result in results) {
+      if (result == null) continue;
+
+      final feature = result.queriedFeature.feature;
+      final ring = _firstRingFromGeoJsonFeature(feature);
+      final coordinates = ring == null
+          ? Position(0, 0)
+          : _sparkleAnchorForRing(ring);
+      _showBuildingDetails(
+        _buildingLocationFromFeature(feature, coordinates),
+        ring ?? const <List<double>>[],
+      );
+      return true;
+    }
+
+    return false;
+  }
+
+  void _showBuildingDetails(LocationData location, List<List<double>> ring) {
+    if (ring.length < 3) {
+      _showLocationDetails(location);
+      return;
+    }
+
+    final activitiesInBuilding = _latestActivities
+        .where(
+          (activity) => _pointInPolygon(
+            lon: activity.longitude,
+            lat: activity.latitude,
+            ring: ring,
+          ),
+        )
+        .toList();
+    _showLocationDetails(location, activitiesInBuilding);
+  }
+
+  List<List<double>>? _firstRingFromGeoJsonFeature(
+    Map<String?, Object?> feature,
+  ) {
+    final geometry = feature['geometry'];
+    if (geometry is! Map) return null;
+    final geometryMap = geometry.cast<String, Object?>();
+    if (geometryMap['type'] != 'Polygon') return null;
+
+    final coordinates = geometryMap['coordinates'];
+    if (coordinates is! List || coordinates.isEmpty) return null;
+    final rawRing = coordinates.first;
+    if (rawRing is! List) return null;
+
+    final ring = <List<double>>[];
+    for (final point in rawRing) {
+      if (point is! List || point.length < 2) continue;
+      ring.add([(point[0] as num).toDouble(), (point[1] as num).toDouble()]);
+    }
+    return ring.length >= 3 ? ring : null;
+  }
+
+  bool _pointInPolygon({
+    required double lon,
+    required double lat,
+    required List<List<double>> ring,
+  }) {
+    var inside = false;
+    for (var i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+      final xi = ring[i][0];
+      final yi = ring[i][1];
+      final xj = ring[j][0];
+      final yj = ring[j][1];
+      final intersects =
+          ((yi > lat) != (yj > lat)) &&
+          (lon < (xj - xi) * (lat - yi) / (yj - yi + 0.0) + xi);
+      if (intersects) inside = !inside;
+    }
+    return inside;
   }
 
   void _focusActivityOnMap(Activity activity) {
@@ -1128,7 +1508,10 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
             viewport: _viewport,
             onMapCreated: _onMapCreated,
             onStyleLoadedListener: _onStyleLoaded,
-            onTapListener: (context) {
+            onTapListener: (context) async {
+              final handled = await _handleBuildingTap(context);
+              if (handled) return;
+
               if (_expandedClusterId == null) return;
               setState(() => _expandedClusterId = null);
               unawaited(_refreshActivities());
@@ -1268,6 +1651,13 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
       ),
     );
   }
+}
+
+class _BuildingMarkerTarget {
+  const _BuildingMarkerTarget({required this.location, required this.ring});
+
+  final LocationData location;
+  final List<List<double>> ring;
 }
 
 class _ActivityCluster {
