@@ -1,4 +1,4 @@
-import 'dart:async';
+﻿import 'dart:async';
 import 'dart:convert';
 import 'dart:math' as math;
 import 'dart:ui' as ui;
@@ -15,6 +15,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:mapbox_maps_flutter/mapbox_maps_flutter.dart';
 import 'package:permission_handler/permission_handler.dart';
+import 'package:campus_app/screens/notifications_screen.dart';
 
 class MapScreen extends StatefulWidget {
   const MapScreen({
@@ -71,20 +72,6 @@ class MapScreen extends StatefulWidget {
 
   @override
   State<MapScreen> createState() => _MapScreenState();
-}
-
-class _NotificationsScreen extends StatelessWidget {
-  const _NotificationsScreen();
-  @override
-  Widget build(BuildContext context) => Scaffold(
-    appBar: AppBar(title: const Text('Notifications')),
-    body: const Center(
-      child: Padding(
-        padding: EdgeInsets.all(24),
-        child: Text('You’re all caught up.'),
-      ),
-    ),
-  );
 }
 
 class _BonChatSheet extends StatefulWidget {
@@ -1532,7 +1519,7 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
                     ),
                     onPressed: () => Navigator.of(context).push(
                       MaterialPageRoute(
-                        builder: (_) => const _NotificationsScreen(),
+                        builder: (_) => const NotificationsScreen(),
                       ),
                     ),
                   ),
