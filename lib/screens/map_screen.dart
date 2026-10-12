@@ -751,12 +751,12 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
 
   String _markerAssetForActivityCount(int count) {
     if (count >= 10) {
-      return 'assets/litMarkerPlus.png';
+      return 'assets/Counterplus.png';
     }
     if (count == 0) {
-      return 'assets/litMarker0.png';
+      return 'assets/Counter0.png';
     }
-    return 'assets/litMarker$count.png';
+    return 'assets/Counter$count.png';
   }
 
   // checks the count and see if image is already loaded
